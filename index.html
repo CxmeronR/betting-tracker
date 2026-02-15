@@ -5,29 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Betting Tracker</title>
     <style>
-      /* macOS title bar drag region */
-      body {
+      html, body {
         margin: 0;
         padding: 0;
-        overflow: hidden;
         background: #0a0a0f;
-        -webkit-app-region: no-drag;
+        overflow: hidden;
+        height: 100%;
       }
-      /* Make the top area draggable for window movement */
-      #titlebar-drag {
-        position: fixed;
-        top: 0;
-        left: 80px;
-        right: 0;
-        height: 38px;
-        -webkit-app-region: drag;
-        z-index: 99999;
-        pointer-events: none;
+      #root {
+        height: 100%;
       }
     </style>
   </head>
   <body>
-    <div id="titlebar-drag"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

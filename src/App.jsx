@@ -4013,13 +4013,13 @@ export default function BettingTracker() {
 
   /* ═══ LAYOUT ═══ */
   return (
-    <div style={{ minHeight: "100vh", background: c.bg, color: c.text, fontFamily: "'DM Sans', -apple-system, sans-serif" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: c.bg, color: c.text, fontFamily: "'DM Sans', -apple-system, sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:${c.borderLight};border-radius:3px}input[type=number]::-webkit-inner-spin-button{opacity:.5}@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@keyframes slideDown{from{opacity:0;transform:translateY(-100%)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}`}</style>
 
       {/* ─── Update Banner ─── */}
       {updateAvailable && !updateDismissed && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, animation: "slideDown 0.4s ease", background: updateAvailable.forceUpdate ? `linear-gradient(135deg, ${c.red}, #cc2244)` : `linear-gradient(135deg, ${c.blue}, ${c.purple})`, padding: "10px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, animation: "slideDown 0.4s ease", background: updateAvailable.forceUpdate ? `linear-gradient(135deg, ${c.red}, #cc2244)` : `linear-gradient(135deg, ${c.blue}, ${c.purple})`, padding: "10px 28px", paddingLeft: window.electronAPI ? 88 : 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
             <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
               {updateAvailable.forceUpdate ? "⚠" : "✦"}
@@ -4078,7 +4078,7 @@ export default function BettingTracker() {
           </div>
         </div>
       )}
-      <div style={{ borderBottom: `1px solid ${c.border}`, padding: "16px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", background: `linear-gradient(180deg, rgba(10,11,15,0.98), ${c.bg})`, backdropFilter: "blur(12px)", position: "sticky", top: (updateAvailable && !updateDismissed) ? 48 : 0, zIndex: 50, transition: "top 0.3s ease" }}>
+      <div style={{ borderBottom: `1px solid ${c.border}`, padding: "16px 28px", paddingLeft: window.electronAPI ? 88 : 28, display: "flex", justifyContent: "space-between", alignItems: "center", background: `linear-gradient(180deg, rgba(10,11,15,0.98), ${c.bg})`, backdropFilter: "blur(12px)", flexShrink: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${c.green}, ${c.blue})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#000" }}>⚡</div>
           <div><h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: -0.5 }}>EdgeTracker</h1><span style={{ fontSize: 10, color: c.textDim, letterSpacing: 1.5, textTransform: "uppercase" }}>Sports Betting Analytics</span></div>
@@ -4169,6 +4169,7 @@ export default function BettingTracker() {
           </div>
         </div>
       )}
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
       <div style={{ padding: "24px 28px", maxWidth: 1240, margin: "0 auto" }}>
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "calendar" && renderCalendar()}
@@ -4178,6 +4179,7 @@ export default function BettingTracker() {
         {activeTab === "accounting" && renderAccounting()}
         {activeTab === "import" && renderImport()}
         {activeTab === "bets" && renderBets()}
+      </div>
       </div>
     </div>
   );
