@@ -83,6 +83,8 @@ autoUpdater.on("download-progress", (progress) => {
   });
 });
 
+let isUpdating = false;
+
 autoUpdater.on("update-downloaded", (info) => {
   log.info("Update downloaded:", info.version);
   sendToWindow("update-status", {
@@ -102,7 +104,7 @@ autoUpdater.on("update-downloaded", (info) => {
       })
       .then(({ response }) => {
         if (response === 0) {
-          autoUpdater.quitAndInstall();
+          forceQuitAndInstall();
         }
       });
   }
@@ -112,6 +114,22 @@ autoUpdater.on("error", (err) => {
   log.error("Auto-updater error:", err);
   sendToWindow("update-status", { status: "error", error: err.message });
 });
+
+function forceQuitAndInstall() {
+  isUpdating = true;
+  log.info("Force quitting for update install...");
+  // On macOS, autoUpdater.quitAndInstall() often fails because the app
+  // doesn't actually quit (window-all-closed handler keeps it alive).
+  // Fix: explicitly set flags and force the quit.
+  autoUpdater.autoInstallOnAppQuit = true;
+  if (mainWindow) {
+    mainWindow.removeAllListeners("close");
+    mainWindow.close();
+  }
+  setTimeout(() => {
+    autoUpdater.quitAndInstall(false, true);
+  }, 100);
+}
 
 function sendToWindow(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -128,7 +146,7 @@ ipcMain.handle("check-for-updates", () => {
   return { isDev };
 });
 ipcMain.handle("install-update", () => {
-  autoUpdater.quitAndInstall();
+  forceQuitAndInstall();
 });
 
 // ─── App Lifecycle ───
@@ -152,7 +170,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" || isUpdating) {
     app.quit();
   }
 });
