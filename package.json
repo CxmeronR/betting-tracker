@@ -1,6 +1,6 @@
 {
   "name": "betting-tracker",
-  "version": "1.0.6",
+  "version": "1.0.0",
   "description": "Professional sports betting analytics dashboard",
   "main": "electron/main.js",
   "author": "Cameron",
@@ -10,8 +10,8 @@
     "dev": "vite",
     "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
-    "build:mac": "vite build && electron-builder --mac",
-    "build:mac:universal": "vite build && electron-builder --mac --universal",
+    "build:mac": "vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "build:mac:universal": "vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --universal",
     "postinstall": "electron-builder install-app-deps",
     "publish": "vite build && electron-builder --mac --publish always"
   },
@@ -45,38 +45,27 @@
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "universal"
-          ]
+          "arch": ["universal"]
         },
         {
           "target": "zip",
-          "arch": [
-            "universal"
-          ]
+          "arch": ["universal"]
         }
       ],
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
+    "afterPack": "./scripts/ad-hoc-sign.js",
     "dmg": {
       "title": "Betting Tracker",
       "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
       ]
     },
     "publish": {
       "provider": "github",
-      "owner": "CxmeronR",
+      "owner": "YOUR_GITHUB_USERNAME",
       "repo": "betting-tracker",
       "releaseType": "release"
     }
