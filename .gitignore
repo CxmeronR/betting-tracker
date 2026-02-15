@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+build/icon.iconset/
+build/icon.icns
+.DS_Store
+*.dmg
+*.zip
