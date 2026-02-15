@@ -90,7 +90,7 @@ function usePersistedSet(key, defaultValue) {
 }
 
 // ─── VERSION & UPDATE SYSTEM ───
-const APP_VERSION = "1.0.4";
+const APP_VERSION = "1.0.10";
 const VERSION_CHECK_URL = "/version.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // check every 5 min
 
