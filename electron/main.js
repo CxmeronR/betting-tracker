@@ -1,13 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const log = require("electron-log");
-const { autoUpdater } = require("electron-updater");
+const https = require("https");
+const fs = require("fs");
 
 // ─── Logging ───
 log.transports.file.level = "info";
-autoUpdater.logger = log;
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
 
 let mainWindow;
 const isDev = !app.isPackaged;
@@ -25,27 +23,22 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
-      // Persist localStorage across sessions (this is default, but explicit)
       partition: "persist:betting-tracker",
     },
     show: false,
   });
 
-  // Graceful show when ready
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
   });
 
-  // Load the app
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
-    // Open DevTools in dev mode
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
-  // Open external links in browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
@@ -56,89 +49,66 @@ function createWindow() {
   });
 }
 
-// ─── Auto Updater Events ───
-autoUpdater.on("checking-for-update", () => {
-  log.info("Checking for update...");
+// ─── Manual Update Check (no Squirrel) ───
+function checkForUpdate() {
+  const currentVersion = app.getVersion();
+  log.info(`Checking for updates... current: ${currentVersion}`);
   sendToWindow("update-status", { status: "checking" });
-});
 
-autoUpdater.on("update-available", (info) => {
-  log.info("Update available:", info.version);
-  sendToWindow("update-status", {
-    status: "available",
-    version: info.version,
-    releaseNotes: info.releaseNotes,
-  });
-});
+  const options = {
+    hostname: "api.github.com",
+    path: "/repos/CxmeronR/betting-tracker/releases/latest",
+    headers: { "User-Agent": "betting-tracker-app" },
+  };
 
-autoUpdater.on("update-not-available", () => {
-  log.info("No update available");
-  sendToWindow("update-status", { status: "up-to-date" });
-});
+  https.get(options, (res) => {
+    let data = "";
+    res.on("data", (chunk) => (data += chunk));
+    res.on("end", () => {
+      try {
+        const release = JSON.parse(data);
+        const latestVersion = (release.tag_name || "").replace(/^v/, "");
+        log.info(`Latest version: ${latestVersion}`);
 
-autoUpdater.on("download-progress", (progress) => {
-  sendToWindow("update-status", {
-    status: "downloading",
-    percent: Math.round(progress.percent),
-  });
-});
+        if (latestVersion && compareVersions(latestVersion, currentVersion) > 0) {
+          // Find the DMG asset
+          const dmgAsset = (release.assets || []).find((a) => a.name.endsWith(".dmg"));
+          const downloadUrl = dmgAsset
+            ? dmgAsset.browser_download_url
+            : release.html_url;
 
-let isUpdating = false;
-
-autoUpdater.on("update-downloaded", (info) => {
-  log.info("Update downloaded:", info.version);
-  sendToWindow("update-status", {
-    status: "downloaded",
-    version: info.version,
-  });
-  // Prompt user
-  if (mainWindow) {
-    dialog
-      .showMessageBox(mainWindow, {
-        type: "info",
-        title: "Update Ready",
-        message: `Version ${info.version} has been downloaded.`,
-        detail: "The update will be installed when you restart the app.",
-        buttons: ["Restart Now", "Later"],
-        defaultId: 0,
-      })
-      .then(({ response }) => {
-        if (response === 0) {
-          forceQuitAndInstall();
+          log.info(`Update available: ${latestVersion}, url: ${downloadUrl}`);
+          sendToWindow("update-status", {
+            status: "available",
+            version: latestVersion,
+            downloadUrl,
+            releaseNotes: release.body || "",
+          });
+        } else {
+          log.info("No update available");
+          sendToWindow("update-status", { status: "up-to-date" });
         }
-      });
-  }
-});
+      } catch (e) {
+        log.error("Failed to parse release info:", e);
+        sendToWindow("update-status", { status: "error", error: e.message });
+      }
+    });
+  }).on("error", (e) => {
+    log.error("Update check failed:", e);
+    sendToWindow("update-status", { status: "error", error: e.message });
+  });
+}
 
-autoUpdater.on("error", (err) => {
-  log.error("Auto-updater error:", err);
-  sendToWindow("update-status", { status: "error", error: err.message });
-});
-
-function forceQuitAndInstall() {
-  isUpdating = true;
-  log.info("Force quitting for update install...");
-  autoUpdater.autoInstallOnAppQuit = true;
-  
-  if (mainWindow) {
-    mainWindow.removeAllListeners("close");
-    mainWindow.close();
+function compareVersions(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
   }
-  
-  // On macOS, Squirrel's relaunch often fails with ad-hoc signed apps.
-  // Use app.relaunch() as a backup to ensure the app reopens.
-  app.relaunch();
-  
-  // Give Squirrel a moment to prep, then force quit.
-  // autoInstallOnAppQuit ensures the update is applied during quit.
-  setTimeout(() => {
-    try {
-      autoUpdater.quitAndInstall(false, true);
-    } catch (e) {
-      log.error("quitAndInstall failed, forcing exit:", e);
-      app.exit(0);
-    }
-  }, 300);
+  return 0;
 }
 
 function sendToWindow(channel, data) {
@@ -151,25 +121,25 @@ function sendToWindow(channel, data) {
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("check-for-updates", () => {
   if (!isDev) {
-    autoUpdater.checkForUpdates();
+    checkForUpdate();
   }
   return { isDev };
 });
-ipcMain.handle("install-update", () => {
-  forceQuitAndInstall();
+ipcMain.handle("install-update", (event, downloadUrl) => {
+  // Open the DMG download URL in the browser
+  if (downloadUrl) {
+    shell.openExternal(downloadUrl);
+  }
 });
 
 // ─── App Lifecycle ───
 app.whenReady().then(() => {
   createWindow();
 
-  // Check for updates after launch (production only)
   if (!isDev) {
     setTimeout(() => {
-      autoUpdater.checkForUpdates().catch((err) => {
-        log.error("Update check failed:", err);
-      });
-    }, 5000); // 5s delay so the app loads first
+      checkForUpdate();
+    }, 5000);
   }
 
   app.on("activate", () => {
@@ -180,7 +150,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" || isUpdating) {
+  if (process.platform !== "darwin") {
     app.quit();
   }
 });

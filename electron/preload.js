@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   
   // Auto-updater
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
-  installUpdate: () => ipcRenderer.invoke("install-update"),
+  installUpdate: (downloadUrl) => ipcRenderer.invoke("install-update", downloadUrl),
   onUpdateStatus: (callback) => {
     ipcRenderer.on("update-status", (_event, data) => callback(data));
     // Return cleanup function

@@ -418,8 +418,8 @@ export default function BettingTracker() {
     // ── Electron auto-updater listener ──
     if (window.electronAPI?.onUpdateStatus) {
       cleanupElectron = window.electronAPI.onUpdateStatus((data) => {
-        if (data.status === "downloaded") {
-          setUpdateAvailable({ version: data.version, notes: "Update downloaded and ready to install." });
+        if (data.status === "available" && data.version) {
+          setUpdateAvailable({ version: data.version, notes: data.releaseNotes || "New version available.", downloadUrl: data.downloadUrl });
           setUpdateDismissed(false);
         }
       });
@@ -465,9 +465,9 @@ export default function BettingTracker() {
   }, []);
 
   const applyUpdate = useCallback(() => {
-    // Electron: quit and install via autoUpdater
+    // Electron: open DMG download in browser
     if (window.electronAPI?.installUpdate) {
-      window.electronAPI.installUpdate();
+      window.electronAPI.installUpdate(updateAvailable?.downloadUrl);
       return;
     }
     // Web/artifact: tell waiting SW to take over, then reload
@@ -475,7 +475,7 @@ export default function BettingTracker() {
       swRegistrationRef.current.waiting.postMessage("SKIP_WAITING");
     }
     setTimeout(() => window.location.reload(), 300);
-  }, []);
+  }, [updateAvailable]);
 
   const filtered = useMemo(() => bets.map(normalizeBet).filter(b => (activeProfile === "all" || (b.profile || profiles[0]?.id) === activeProfile) && (filterSport === "All" || b.sport === filterSport) && (filterLeague === "All" || b.league === filterLeague) && (filterType === "All" || b.type === filterType)), [bets, filterSport, filterLeague, filterType, activeProfile]);
 
@@ -4204,7 +4204,7 @@ export default function BettingTracker() {
               What's New
             </button>
             <button onClick={applyUpdate} style={{ background: "rgba(255,255,255,0.95)", border: "none", borderRadius: 8, padding: "6px 18px", color: "#111", fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }}>
-              Update Now
+              {window.electronAPI ? "Download Update" : "Update Now"}
             </button>
             {!updateAvailable.forceUpdate && (
               <button onClick={() => setUpdateDismissed(true)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", fontSize: 16, cursor: "pointer", padding: "4px 8px", lineHeight: 1 }}>✕</button>
@@ -4239,7 +4239,7 @@ export default function BettingTracker() {
               </div>
             ))}
             <button onClick={() => { setShowChangelog(false); applyUpdate(); }} style={{ width: "100%", background: `linear-gradient(135deg, ${c.green}, ${c.blue})`, border: "none", borderRadius: 10, padding: "12px 0", color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
-              Update to v{updateAvailable.version}
+              {window.electronAPI ? "Download" : "Update to"} v{updateAvailable.version}
             </button>
           </div>
         </div>
