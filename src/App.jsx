@@ -155,35 +155,40 @@ Object.entries(LEAGUES).forEach(([sport, leagues]) => leagues.forEach(l => { LEA
 SPORTS.forEach(s => { if (!LEAGUE_TO_SPORT[s]) LEAGUE_TO_SPORT[s] = s; });
 
 // Normalize a bet object — adds league/sport fields if missing, handles old format
-const NBA_TEAMS = /\b(ATL|BOS|BKN|CHA|CHI|CLE|DAL|DEN|DET|GSW|HOU|IND|LAC|LAL|MEM|MIA|MIL|MIN|NOP|NYK|OKC|ORL|PHI|PHX|POR|SAC|SAS|TOR|UTA|WAS)\b/;
-const NFL_TEAMS = /\b(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)\b/;
-const NHL_TEAMS = /\b(ANA|ARI|BOS|BUF|CAR|CBJ|CGY|CHI|COL|DAL|DET|EDM|FLA|LA|MIN|MTL|NJ|NSH|NYI|NYR|OTT|PHI|PIT|SEA|SJ|STL|TB|TOR|VAN|VGK|WPG|WSH)\b/;
-const MLB_TEAMS = /\b(ARI|ATL|BAL|BOS|CHC|CHW|CIN|CLE|COL|DET|HOU|KC|LAA|LAD|MIA|MIL|MIN|NYM|NYY|OAK|PHI|PIT|SD|SF|SEA|STL|TB|TEX|TOR|WSH)\b/;
 const MMA_KW = /\bfight time\b|\bround\b.*\bover\b|\bmethod of victory\b|\bdecision\b|\bko\b|\btko\b|\bsubmission\b|\bknockout\b/i;
 
 const inferSportFromEvent = (ev) => {
   if (!ev) return null;
-  const nba = (ev.match(NBA_TEAMS) || []).length;
-  const mma = MMA_KW.test(ev) || /vs\.\s*[A-Z][a-z]+ [A-Z][a-z]+/.test(ev) && /fight|bout|round|mins/i.test(ev);
-  if (mma) return { sport: "MMA", league: "UFC" };
+  const upper = ev.toUpperCase();
+  // MMA detection
+  if (MMA_KW.test(ev)) return { sport: "MMA", league: "UFC" };
+  if (/vs\.\s*[A-Z][a-z]+ [A-Z][a-z]+/.test(ev) && /fight|bout|round|mins/i.test(ev)) return { sport: "MMA", league: "UFC" };
+  // Count distinct team matches using global regex
+  const countTeams = (re) => new Set((upper.match(re) || [])).size;
+  const nba = countTeams(/\b(ATL|BOS|BKN|CHA|CHI|CLE|DAL|DEN|DET|GSW|HOU|IND|LAC|LAL|MEM|MIA|MIL|MIN|NOP|NYK|OKC|ORL|PHI|PHX|POR|SAC|SAS|TOR|UTA|WAS)\b/g);
   if (nba >= 2) return { sport: "Basketball", league: "NBA" };
-  const nfl = (ev.match(NFL_TEAMS) || []).length;
+  const nfl = countTeams(/\b(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)\b/g);
   if (nfl >= 2) return { sport: "Football", league: "NFL" };
-  const nhl = (ev.match(NHL_TEAMS) || []).length;
+  const nhl = countTeams(/\b(ANA|ARI|BOS|BUF|CAR|CBJ|CGY|CHI|COL|DAL|DET|EDM|FLA|LA|MIN|MTL|NJ|NSH|NYI|NYR|OTT|PHI|PIT|SEA|SJ|STL|TB|TOR|VAN|VGK|WPG|WSH)\b/g);
   if (nhl >= 2) return { sport: "Hockey", league: "NHL" };
-  const mlb = (ev.match(MLB_TEAMS) || []).length;
+  const mlb = countTeams(/\b(ARI|ATL|BAL|BOS|CHC|CHW|CIN|CLE|COL|DET|HOU|KC|LAA|LAD|MIA|MIL|MIN|NYM|NYY|OAK|PHI|PIT|SD|SF|SEA|STL|TB|TEX|TOR|WSH)\b/g);
   if (mlb >= 2) return { sport: "Baseball", league: "MLB" };
+  // Single team code — still useful for props
+  if (nba >= 1) return { sport: "Basketball", league: "NBA" };
+  if (nfl >= 1) return { sport: "Football", league: "NFL" };
+  if (nhl >= 1) return { sport: "Hockey", league: "NHL" };
+  if (mlb >= 1) return { sport: "Baseball", league: "MLB" };
   return null;
 };
 
 const normalizeBet = (b) => {
   const isParlay = b.parlay || b.type === "Parlay" || b.type === "Round Robin";
   if (b.league && b.sport && SPORTS.includes(b.sport)) {
-    // If it's a parlay/RR under "Other" sport, try to infer from event text
-    if (b.sport === "Other" && isParlay) {
-      const inferred = inferSportFromEvent(b.event || b.pick || "");
+    // Any bet under "Other" sport — try to infer from event/pick text
+    if (b.sport === "Other") {
+      const inferred = inferSportFromEvent(`${b.event || ""} ${b.pick || ""}`);
       if (inferred) return { ...b, ...inferred };
-      return { ...b, league: b.league === "Other" ? "Multi-Sport Parlay" : b.league };
+      if (isParlay && b.league === "Other") return { ...b, league: "Multi-Sport Parlay" };
     }
     return b;
   }
@@ -191,11 +196,10 @@ const normalizeBet = (b) => {
   const raw = b.league || b.sport || "Other";
   let league = raw;
   let sport = LEAGUE_TO_SPORT[raw] || (SPORTS.includes(raw) ? raw : "Other");
-  // Classify unknown parlays
-  if (sport === "Other" && isParlay) {
-    const inferred = inferSportFromEvent(b.event || b.pick || "");
+  if (sport === "Other") {
+    const inferred = inferSportFromEvent(`${b.event || ""} ${b.pick || ""}`);
     if (inferred) return { ...b, ...inferred };
-    if (league === "Other") league = "Multi-Sport Parlay";
+    if (isParlay && league === "Other") league = "Multi-Sport Parlay";
   }
   return { ...b, league, sport };
 };
@@ -1821,8 +1825,8 @@ export default function BettingTracker() {
     const yrBets = yr === "all" ? bets : bets.filter(b => b.date.startsWith(yr));
 
     // --- Summary CSV ---
-    const grossWin = yrBets.filter(b => b.result === "won").reduce((s, b) => s + b.payout, 0);
-    const grossLoss = yrBets.filter(b => b.result === "lost").reduce((s, b) => s + b.stake, 0);
+    const grossWin = yrBets.filter(b => b.result === "won").reduce((s, b) => s + b.profit, 0);
+    const grossLoss = yrBets.filter(b => b.result === "lost").reduce((s, b) => s + Math.abs(b.profit), 0);
     const netProfit = yrBets.reduce((s, b) => s + b.profit, 0);
     const totalStaked = yrBets.reduce((s, b) => s + b.stake, 0);
     const w2gTotal = w2gDocuments.filter(d => yr === "all" || d.date.startsWith(yr)).reduce((s, d) => s + d.amount, 0);
@@ -1838,8 +1842,8 @@ export default function BettingTracker() {
     csv += "Category,Amount\n";
     csv += `Total Bets Placed,${yrBets.length}\n`;
     csv += `Total Amount Wagered,"${totalStaked.toFixed(2)}"\n`;
-    csv += `Gross Winnings (payouts),"${grossWin.toFixed(2)}"\n`;
-    csv += `Gross Losses (stakes on lost bets),"${grossLoss.toFixed(2)}"\n`;
+    csv += `Gross Winnings (profit from wins),"${grossWin.toFixed(2)}"\n`;
+    csv += `Gross Losses (loss on lost bets),"${grossLoss.toFixed(2)}"\n`;
     csv += `Net Gambling Profit/Loss,"${netProfit.toFixed(2)}"\n`;
     csv += `Win Rate,${yrBets.filter(b => b.result !== "push").length ? ((yrBets.filter(b => b.result === "won").length / yrBets.filter(b => b.result !== "push").length) * 100).toFixed(1) + "%" : "N/A"}\n\n`;
 
@@ -1852,8 +1856,8 @@ export default function BettingTracker() {
       byBook[b.sportsbook].count++;
       byBook[b.sportsbook].stake += b.stake;
       byBook[b.sportsbook].profit += b.profit;
-      if (b.result === "won") byBook[b.sportsbook].wins += b.payout;
-      else if (b.result === "lost") byBook[b.sportsbook].losses += b.stake;
+      if (b.result === "won") byBook[b.sportsbook].wins += b.profit;
+      else if (b.result === "lost") byBook[b.sportsbook].losses += Math.abs(b.profit);
     });
     Object.entries(byBook).sort((a, b) => b[1].profit - a[1].profit).forEach(([book, d]) => {
       csv += `"${book}",${d.count},"${d.stake.toFixed(2)}","${d.wins.toFixed(2)}","${d.losses.toFixed(2)}","${d.profit.toFixed(2)}"\n`;
@@ -1870,8 +1874,8 @@ export default function BettingTracker() {
       byMonth[m].count++;
       byMonth[m].stake += b.stake;
       byMonth[m].profit += b.profit;
-      if (b.result === "won") byMonth[m].wins += b.payout;
-      else if (b.result === "lost") byMonth[m].losses += b.stake;
+      if (b.result === "won") byMonth[m].wins += b.profit;
+      else if (b.result === "lost") byMonth[m].losses += Math.abs(b.profit);
     });
     Object.keys(byMonth).sort().forEach(m => {
       const d = byMonth[m];
@@ -2884,11 +2888,14 @@ export default function BettingTracker() {
       return null;
     };
     const getBetNum = (info) => {
-      const m = info.match(/(?:Over|Under)\s+([\d.]+)/i);
+      // "Over 20.5", "Under 5.5", "O 20.5", "U 5.5", "| Over 20.5"
+      const m = info.match(/(?:Over|Under|O|U)\s+([\d.]+)/i);
       return m ? parseFloat(m[1]) : null;
     };
     const getSpreadNum = (info) => {
-      const m = info.match(/([+-]?\d+\.?\d*)\s*(?:Spread|Handicap|Point|POINT)/i);
+      // "+3.5 Spread", "Spread -7", also standalone "+3.5" or "-7.5" near spread context
+      const m = info.match(/([+-]?\d+\.?\d*)\s*(?:Spread|Handicap|Point|POINT)/i) 
+             || info.match(/(?:Spread|Handicap)\s*([+-]?\d+\.?\d*)/i);
       return m ? parseFloat(m[1]) : null;
     };
     const getMLPick = (info) => {
@@ -2898,12 +2905,28 @@ export default function BettingTracker() {
       return null;
     };
     const normalizeEvent = (ev) => {
-      const m = ev.match(/([A-Z][A-Za-z\s.'\-]+?)\s+(?:@|vs\.?|at|v)\s+([A-Z][A-Za-z\s.'\-]+)/);
-      if (m) { const ts = [m[1].trim().slice(0,22), m[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
-      return ev.slice(-40);
+      if (!ev) return ev;
+      // Try 3-letter abbreviated team codes first: "TOR vs. POR", "SAC vs MIN", "LAL @ BOS"
+      const abbr = ev.match(/\b([A-Z]{2,4})\s+(?:@|vs\.?|at|v)\s+([A-Z]{2,4})\b/);
+      if (abbr) { const ts = [abbr[1], abbr[2]].sort(); return `${ts[0]}|${ts[1]}`; }
+      // Try embedded abbreviated codes anywhere in string (handles "Player Name TOR vs. POR | Over X")
+      const embedded = ev.match(/([A-Z]{2,5})\s+(?:@|vs\.?|at|v)\s+([A-Z]{2,5})/);
+      if (embedded) { const ts = [embedded[1], embedded[2]].sort(); return `${ts[0]}|${ts[1]}`; }
+      // Full team names: "Toronto Raptors @ Portland Trail Blazers"
+      const full = ev.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:@|vs\.?|at|v)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+      if (full) { const ts = [full[1].trim().slice(0,22), full[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
+      // MMA: "Fighter Name vs. Fighter Name"
+      const mma = ev.match(/([A-Z][a-z]+\s+[A-Z][A-Za-z'\-]+)\s+(?:vs\.?|v)\s+([A-Z][a-z]+\s+[A-Z][A-Za-z'\-]+)/);
+      if (mma) { const ts = [mma[1].trim().slice(0,22), mma[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
+      // Fallback: strip numbers, special chars, normalize whitespace
+      return ev.replace(/[^A-Za-z\s]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
     };
     filtered.forEach((b, idx) => {
-      const key = `${b.date}|${normalizeEvent(b.event)}`;
+      // Try event first, then pick, then combined for team matchup
+      let norm = normalizeEvent(b.event);
+      if (!norm || !norm.includes("|")) norm = normalizeEvent(b.pick);
+      if (!norm || !norm.includes("|")) norm = normalizeEvent(`${b.event} ${b.pick}`);
+      const key = `${b.date}|${norm}`;
       if (!gameGroups[key]) gameGroups[key] = [];
       gameGroups[key].push({ ...b, _idx: idx });
     });
@@ -2915,10 +2938,13 @@ export default function BettingTracker() {
       if (gBets.length < 2) return;
 
       // Extract line info for each bet
-      const enriched = gBets.map(b => ({
-        ...b, dir: getBetDir(b.pick || b.event), num: getBetNum(b.pick || b.event),
-        spreadNum: getSpreadNum(b.pick || b.event), mlPick: getMLPick(b.pick || b.event),
-      }));
+      const enriched = gBets.map(b => {
+        const combined = `${b.pick || ""} ${b.event || ""}`;
+        return {
+          ...b, dir: getBetDir(combined), num: getBetNum(combined),
+          spreadNum: getSpreadNum(combined), mlPick: getMLPick(combined),
+        };
+      });
 
       const overs = enriched.filter(e => e.dir === "over" && e.num != null);
       const unders = enriched.filter(e => e.dir === "under" && e.num != null);
@@ -3083,7 +3109,7 @@ export default function BettingTracker() {
         {stratFocus !== "overview" && (() => {
           const st = strategies.find(s => s.id === stratFocus);
           if (!st || st.plays === 0) return <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24, textAlign: "center", color: c.textDim }}>No {st?.label || ""} plays detected in current data.</div>;
-          const sortedItems = [...st.items].sort((a, b) => b.totalPL - a.totalPL);
+          const sortedItems = [...st.items].sort((a, b) => b.date.localeCompare(a.date));
 
           return (
             <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
@@ -3246,8 +3272,24 @@ export default function BettingTracker() {
     const profKey = activeProfile === "all" ? null : activeProfile;
     const pBooks = profKey ? bankrollEntries.filter(e => (e.profile || profiles[0]?.id) === profKey) : bankrollEntries;
     const pHistory = profKey ? bankrollHistory.filter(t => (t.profile || profiles[0]?.id) === profKey) : bankrollHistory;
-    const sortedBooks = [...pBooks].sort((a, b) => b.balance - a.balance);
-    const maxBal = Math.max(1, ...sortedBooks.map(e => e.balance));
+
+    // When "All Profiles", aggregate books with the same name
+    const displayBooks = profKey ? [...pBooks].sort((a, b) => b.balance - a.balance) : (() => {
+      const agg = {};
+      pBooks.forEach(e => {
+        const key = e.book;
+        if (!agg[key]) agg[key] = { id: `agg_${key}`, book: key, balance: 0, lastUpdated: e.lastUpdated, profiles: [], entries: [] };
+        agg[key].balance += e.balance;
+        agg[key].entries.push(e);
+        const pName = profiles.find(p => p.id === (e.profile || profiles[0]?.id))?.name || e.profile;
+        agg[key].profiles.push({ name: pName, balance: e.balance });
+        if (e.lastUpdated > agg[key].lastUpdated) agg[key].lastUpdated = e.lastUpdated;
+      });
+      return Object.values(agg).sort((a, b) => b.balance - a.balance);
+    })();
+    const isAggregated = !profKey;
+
+    const maxBal = Math.max(1, ...displayBooks.map(e => e.balance));
     const booksTotal = pBooks.reduce((s, e) => s + e.balance, 0);
     const curBankBal = profKey ? (bankBalances[profKey] || 0) : Object.values(bankBalances).reduce((s, v) => s + v, 0);
     const totalBR = booksTotal + curBankBal;
@@ -3282,7 +3324,7 @@ export default function BettingTracker() {
 
         {/* KPI row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-          <StatCard label="Total Bankroll" value={`$${totalBR.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.green} sub={`${pBooks.length} books + bank`} />
+          <StatCard label="Total Bankroll" value={`$${totalBR.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.green} sub={`${displayBooks.length} books + bank`} />
           <StatCard label="Bankroll Growth $" value={`${growthDollar >= 0 ? "+" : ""}$${growthDollar.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} color={growthDollar >= 0 ? c.green : c.red} sub={`vs $${jan1.toLocaleString()} on Jan 1`} />
           <StatCard label="Bankroll Growth %" value={`${growthPct >= 0 ? "+" : ""}${growthPct.toFixed(1)}%`} color={growthPct >= 0 ? c.green : c.red} sub="Return on starting bankroll" />
           <StatCard label="Bank Balance" value={`$${curBankBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.cyan} sub="Liquidity not in books" />
@@ -3295,13 +3337,13 @@ export default function BettingTracker() {
             <button onClick={() => setShowAddBook(true)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>+ Add Book</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-            {sortedBooks.map(entry => (
+            {displayBooks.map(entry => (
               <div key={entry.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 12, padding: 16, position: "relative" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: c.text }}>{entry.book}</span>
-                  <button onClick={() => setEditingBook(entry.id === editingBook ? null : entry.id)} style={{ background: "transparent", border: "none", color: c.textDim, fontSize: 14, cursor: "pointer", padding: 0 }}>✎</button>
+                  {!isAggregated && <button onClick={() => setEditingBook(entry.id === editingBook ? null : entry.id)} style={{ background: "transparent", border: "none", color: c.textDim, fontSize: 14, cursor: "pointer", padding: 0 }}>✎</button>}
                 </div>
-                {editingBook === entry.id ? (
+                {!isAggregated && editingBook === entry.id ? (
                   <div style={{ display: "flex", gap: 6 }}>
                     <input type="number" defaultValue={entry.balance} style={{ ...fieldInput, width: "100%", fontSize: 14 }} onKeyDown={e => { if (e.key === "Enter") { setBankrollEntries(prev => prev.map(b => b.id === entry.id ? { ...b, balance: parseFloat(e.target.value) || 0, lastUpdated: new Date().toISOString().slice(0, 10) } : b)); setEditingBook(null); }}} />
                     <button onClick={() => { setBankrollEntries(prev => prev.filter(b => b.id !== entry.id)); setEditingBook(null); }} style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, color: c.red, borderColor: c.red + "44" }}>✕</button>
@@ -3309,6 +3351,16 @@ export default function BettingTracker() {
                 ) : (
                   <>
                     <div style={{ fontSize: 22, fontWeight: 700, color: c.green, fontFamily: "'JetBrains Mono', monospace" }}>${entry.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                    {isAggregated && entry.profiles && entry.profiles.length > 1 && (
+                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+                        {entry.profiles.map((p, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: c.textDim }}>
+                            <span>{p.name}</span>
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>${p.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ height: 4, background: "rgba(255,255,255,0.04)", borderRadius: 2, marginTop: 10, overflow: "hidden" }}>
                       <div style={{ width: `${(entry.balance / maxBal) * 100}%`, height: "100%", background: `linear-gradient(90deg, ${c.green}, ${c.blue})`, borderRadius: 2, transition: "width 0.5s" }} />
                     </div>
