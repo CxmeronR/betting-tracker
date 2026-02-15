@@ -408,12 +408,23 @@ export default function BettingTracker() {
   const swRegistrationRef = useRef(null);
 
   useEffect(() => {
+    let cleanupElectron;
+
+    // ── Electron auto-updater listener ──
+    if (window.electronAPI?.onUpdateStatus) {
+      cleanupElectron = window.electronAPI.onUpdateStatus((data) => {
+        if (data.status === "downloaded") {
+          setUpdateAvailable({ version: data.version, notes: "Update downloaded and ready to install." });
+          setUpdateDismissed(false);
+        }
+      });
+    }
+
     // 1. Register service worker
     registerServiceWorker().then(reg => { swRegistrationRef.current = reg; });
 
     // 2. Listen for SW-level update detection
     const handleSWUpdate = () => {
-      // SW found a new version — trigger version.json check too
       checkVersionEndpoint().then(data => {
         if (data && semverCompare(data.version, APP_VERSION) > 0) {
           setUpdateAvailable(data);
@@ -441,6 +452,7 @@ export default function BettingTracker() {
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
+      if (cleanupElectron) cleanupElectron();
       window.removeEventListener("sw-update-available", handleSWUpdate);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearInterval(interval);
@@ -448,11 +460,15 @@ export default function BettingTracker() {
   }, []);
 
   const applyUpdate = useCallback(() => {
-    // Tell waiting SW to take over, then reload
+    // Electron: quit and install via autoUpdater
+    if (window.electronAPI?.installUpdate) {
+      window.electronAPI.installUpdate();
+      return;
+    }
+    // Web/artifact: tell waiting SW to take over, then reload
     if (swRegistrationRef.current?.waiting) {
       swRegistrationRef.current.waiting.postMessage("SKIP_WAITING");
     }
-    // Small delay to let SW activate before reload
     setTimeout(() => window.location.reload(), 300);
   }, []);
 
