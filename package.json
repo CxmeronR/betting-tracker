@@ -1,6 +1,6 @@
 {
   "name": "betting-tracker",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Professional sports betting analytics dashboard",
   "main": "electron/main.js",
   "author": "Cameron",
