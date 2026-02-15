@@ -118,17 +118,27 @@ autoUpdater.on("error", (err) => {
 function forceQuitAndInstall() {
   isUpdating = true;
   log.info("Force quitting for update install...");
-  // On macOS, autoUpdater.quitAndInstall() often fails because the app
-  // doesn't actually quit (window-all-closed handler keeps it alive).
-  // Fix: explicitly set flags and force the quit.
   autoUpdater.autoInstallOnAppQuit = true;
+  
   if (mainWindow) {
     mainWindow.removeAllListeners("close");
     mainWindow.close();
   }
+  
+  // On macOS, Squirrel's relaunch often fails with ad-hoc signed apps.
+  // Use app.relaunch() as a backup to ensure the app reopens.
+  app.relaunch();
+  
+  // Give Squirrel a moment to prep, then force quit.
+  // autoInstallOnAppQuit ensures the update is applied during quit.
   setTimeout(() => {
-    autoUpdater.quitAndInstall(false, true);
-  }, 100);
+    try {
+      autoUpdater.quitAndInstall(false, true);
+    } catch (e) {
+      log.error("quitAndInstall failed, forcing exit:", e);
+      app.exit(0);
+    }
+  }, 300);
 }
 
 function sendToWindow(channel, data) {
