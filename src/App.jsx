@@ -90,7 +90,7 @@ function usePersistedSet(key, defaultValue) {
 }
 
 // ─── VERSION & UPDATE SYSTEM ───
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.0.4";
 const VERSION_CHECK_URL = "/version.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // check every 5 min
 
@@ -155,11 +155,35 @@ Object.entries(LEAGUES).forEach(([sport, leagues]) => leagues.forEach(l => { LEA
 SPORTS.forEach(s => { if (!LEAGUE_TO_SPORT[s]) LEAGUE_TO_SPORT[s] = s; });
 
 // Normalize a bet object — adds league/sport fields if missing, handles old format
+const NBA_TEAMS = /\b(ATL|BOS|BKN|CHA|CHI|CLE|DAL|DEN|DET|GSW|HOU|IND|LAC|LAL|MEM|MIA|MIL|MIN|NOP|NYK|OKC|ORL|PHI|PHX|POR|SAC|SAS|TOR|UTA|WAS)\b/;
+const NFL_TEAMS = /\b(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)\b/;
+const NHL_TEAMS = /\b(ANA|ARI|BOS|BUF|CAR|CBJ|CGY|CHI|COL|DAL|DET|EDM|FLA|LA|MIN|MTL|NJ|NSH|NYI|NYR|OTT|PHI|PIT|SEA|SJ|STL|TB|TOR|VAN|VGK|WPG|WSH)\b/;
+const MLB_TEAMS = /\b(ARI|ATL|BAL|BOS|CHC|CHW|CIN|CLE|COL|DET|HOU|KC|LAA|LAD|MIA|MIL|MIN|NYM|NYY|OAK|PHI|PIT|SD|SF|SEA|STL|TB|TEX|TOR|WSH)\b/;
+const MMA_KW = /\bfight time\b|\bround\b.*\bover\b|\bmethod of victory\b|\bdecision\b|\bko\b|\btko\b|\bsubmission\b|\bknockout\b/i;
+
+const inferSportFromEvent = (ev) => {
+  if (!ev) return null;
+  const nba = (ev.match(NBA_TEAMS) || []).length;
+  const mma = MMA_KW.test(ev) || /vs\.\s*[A-Z][a-z]+ [A-Z][a-z]+/.test(ev) && /fight|bout|round|mins/i.test(ev);
+  if (mma) return { sport: "MMA", league: "UFC" };
+  if (nba >= 2) return { sport: "Basketball", league: "NBA" };
+  const nfl = (ev.match(NFL_TEAMS) || []).length;
+  if (nfl >= 2) return { sport: "Football", league: "NFL" };
+  const nhl = (ev.match(NHL_TEAMS) || []).length;
+  if (nhl >= 2) return { sport: "Hockey", league: "NHL" };
+  const mlb = (ev.match(MLB_TEAMS) || []).length;
+  if (mlb >= 2) return { sport: "Baseball", league: "MLB" };
+  return null;
+};
+
 const normalizeBet = (b) => {
+  const isParlay = b.parlay || b.type === "Parlay" || b.type === "Round Robin";
   if (b.league && b.sport && SPORTS.includes(b.sport)) {
-    // If it's a parlay/RR under "Other" sport with "Other" league, reclassify as Multi-Sport Parlay
-    if (b.sport === "Other" && b.league === "Other" && (b.parlay || b.type === "Parlay" || b.type === "Round Robin")) {
-      return { ...b, league: "Multi-Sport Parlay" };
+    // If it's a parlay/RR under "Other" sport, try to infer from event text
+    if (b.sport === "Other" && isParlay) {
+      const inferred = inferSportFromEvent(b.event || b.pick || "");
+      if (inferred) return { ...b, ...inferred };
+      return { ...b, league: b.league === "Other" ? "Multi-Sport Parlay" : b.league };
     }
     return b;
   }
@@ -167,9 +191,11 @@ const normalizeBet = (b) => {
   const raw = b.league || b.sport || "Other";
   let league = raw;
   let sport = LEAGUE_TO_SPORT[raw] || (SPORTS.includes(raw) ? raw : "Other");
-  // Classify unknown parlays as Multi-Sport Parlay
-  if (sport === "Other" && league === "Other" && (b.parlay || b.type === "Parlay" || b.type === "Round Robin")) {
-    league = "Multi-Sport Parlay";
+  // Classify unknown parlays
+  if (sport === "Other" && isParlay) {
+    const inferred = inferSportFromEvent(b.event || b.pick || "");
+    if (inferred) return { ...b, ...inferred };
+    if (league === "Other") league = "Multi-Sport Parlay";
   }
   return { ...b, league, sport };
 };
@@ -503,9 +529,11 @@ export default function BettingTracker() {
   const dashStats = useMemo(() => computeStats(dashFiltered), [dashFiltered]);
 
   const taxStats = useMemo(() => {
-    const taxBets = taxYear === "all" ? bets : bets.filter(b => b.date.startsWith(taxYear));
-    const grossWinnings = taxBets.filter(b => b.result === "won").reduce((s, b) => s + b.payout, 0);
-    const totalLosses = taxBets.filter(b => b.result === "lost").reduce((s, b) => s + b.stake, 0);
+    const allBets = bets.map(normalizeBet);
+    const profBets = activeProfile === "all" ? allBets : allBets.filter(b => (b.profile || profiles[0]?.id) === activeProfile);
+    const taxBets = taxYear === "all" ? profBets : profBets.filter(b => b.date.startsWith(taxYear));
+    const grossWinnings = taxBets.filter(b => b.result === "won").reduce((s, b) => s + b.profit, 0);
+    const totalLosses = taxBets.filter(b => b.result === "lost").reduce((s, b) => s + Math.abs(b.profit), 0);
     const netGambling = grossWinnings - totalLosses;
     const taxableGambling = Math.max(0, netGambling);
     const totalIncome = taxOtherIncome + taxableGambling;
@@ -513,7 +541,7 @@ export default function BettingTracker() {
     const gamblingTax = taxWithGambling - calcTax(taxOtherIncome);
     const effectiveRate = taxableGambling ? (gamblingTax / taxableGambling) * 100 : 0;
     return { grossWinnings, totalLosses, netGambling, taxableGambling, totalIncome, taxWithGambling, gamblingTax, effectiveRate, quarterlyEstimate: gamblingTax / 4, betCount: taxBets.length };
-  }, [bets, taxOtherIncome, taxYear]);
+  }, [bets, taxOtherIncome, taxYear, activeProfile, profiles]);
 
   const expenseStats = useMemo(() => {
     const active = expenses.filter(e => e.active);
@@ -1374,24 +1402,45 @@ export default function BettingTracker() {
   };
 
   // ─── BACKUP / RESTORE ───
+  const [exportedJson, setExportedJson] = useState(null);
+  const [showPasteRestore, setShowPasteRestore] = useState(false);
+  const [pasteJson, setPasteJson] = useState("");
+
   const exportBackup = useCallback(() => {
-    const backup = { _meta: { version: APP_VERSION, exportedAt: new Date().toISOString(), keys: PERSISTED_KEYS.length } };
-    PERSISTED_KEYS.forEach(key => {
-      try {
-        const raw = localStorage.getItem(`et_${key}`);
-        if (raw !== null) backup[key] = JSON.parse(raw);
-      } catch {}
+    const stateMap = {
+      bets, expenses, profiles, activeProfile, bankrollEntries, bankrollHistory,
+      expensesPaidManual: [...expensesPaidManual], bankBalances, jan1Bankrolls,
+      profileNotes, bookLimits, apiEndpoints, w2gDocuments, expenseReceipts,
+      taxOtherIncome, taxFilingStatus, profitGoals, freeBetMode
+    };
+    const backup = { _meta: { version: APP_VERSION, exportedAt: new Date().toISOString(), keys: Object.keys(stateMap).length } };
+    Object.entries(stateMap).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) backup[key] = value;
     });
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `edgetracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setImportStatus({ type: "success", message: `Backup exported — ${PERSISTED_KEYS.length} data keys saved` });
-    setTimeout(() => setImportStatus(null), 4000);
-  }, []);
+    const jsonStr = JSON.stringify(backup, null, 2);
+    const filename = `edgetracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
+
+    // In Electron, use IPC or standard download
+    if (window.electronAPI) {
+      try {
+        const blob = new Blob([jsonStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.style.display = "none";
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+        setImportStatus({ type: "success", message: `Backup exported — ${Object.keys(stateMap).length} data keys saved` });
+        setTimeout(() => setImportStatus(null), 4000);
+        return;
+      } catch {}
+    }
+
+    // In browser/artifact: copy to clipboard and show modal
+    try { navigator.clipboard.writeText(jsonStr); } catch {}
+    setExportedJson(jsonStr);
+    setImportStatus({ type: "success", message: `Backup ready — ${Object.keys(stateMap).length} data keys. Copy the JSON below.` });
+    setTimeout(() => setImportStatus(null), 6000);
+  }, [bets, expenses, profiles, activeProfile, bankrollEntries, bankrollHistory, expensesPaidManual, bankBalances, jan1Bankrolls, profileNotes, bookLimits, apiEndpoints, w2gDocuments, expenseReceipts, taxOtherIncome, taxFilingStatus, profitGoals, freeBetMode]);
 
   const importBackup = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -1399,21 +1448,7 @@ export default function BettingTracker() {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const backup = JSON.parse(ev.target.result);
-        if (!backup._meta) throw new Error("Not a valid EdgeTracker backup file");
-        let restored = 0;
-        for (const key of PERSISTED_KEYS) {
-          if (backup[key] !== undefined) {
-            const json = JSON.stringify(backup[key]);
-            localStorage.setItem(`et_${key}`, json);
-            if (window.storage) {
-              try { await window.storage.set(`et_${key}`, json); } catch {}
-            }
-            restored++;
-          }
-        }
-        setImportStatus({ type: "success", message: `Backup restored — ${restored} keys loaded. Reloading…` });
-        setTimeout(() => window.location.reload(), 1500);
+        await restoreFromJson(ev.target.result);
       } catch (err) {
         setImportStatus({ type: "error", message: `Restore failed: ${err.message}` });
         setTimeout(() => setImportStatus(null), 5000);
@@ -1422,6 +1457,36 @@ export default function BettingTracker() {
     reader.readAsText(file);
     e.target.value = "";
   }, []);
+
+  const restoreFromJson = async (text) => {
+    const backup = JSON.parse(text);
+    if (!backup._meta) throw new Error("Not a valid EdgeTracker backup file");
+    let restored = 0;
+    for (const key of PERSISTED_KEYS) {
+      if (backup[key] !== undefined) {
+        const json = JSON.stringify(backup[key]);
+        try { localStorage.setItem(`et_${key}`, json); } catch {}
+        if (window.storage) {
+          try { await window.storage.set(`et_${key}`, json); } catch {}
+        }
+        restored++;
+      }
+    }
+    setImportStatus({ type: "success", message: `Backup restored — ${restored} keys loaded. Reloading…` });
+    setTimeout(() => window.location.reload(), 1500);
+  };
+
+  const handlePasteRestore = async () => {
+    if (!pasteJson.trim()) return;
+    try {
+      await restoreFromJson(pasteJson);
+      setPasteJson("");
+      setShowPasteRestore(false);
+    } catch (err) {
+      setImportStatus({ type: "error", message: `Restore failed: ${err.message}` });
+      setTimeout(() => setImportStatus(null), 5000);
+    }
+  };
 
   const saveApiEndpoint = () => { if (!apiForm.name || !apiForm.url) return; setApiEndpoints(prev => [...prev, { ...apiForm, id: Date.now(), lastSync: null, status: "disconnected" }]); setApiForm({ name: "", url: "", key: "", sport: "All", active: true }); setShowAddApi(false); };
 
@@ -3458,9 +3523,9 @@ export default function BettingTracker() {
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-        <StatCard label="Gross Winnings" value={formatMoney(taxStats.grossWinnings)} color={c.green} sub="Total payouts from wins" />
+        <StatCard label="Gross Winnings" value={formatMoney(taxStats.grossWinnings)} color={c.green} sub="Profit from winning bets" />
         <StatCard label="Total Losses" value={formatMoney(taxStats.totalLosses)} color={c.red} sub="Deductible if itemizing" />
-        <StatCard label="Net Gambling Income" value={formatMoney(taxStats.netGambling)} color={taxStats.netGambling >= 0 ? c.green : c.red} />
+        <StatCard label="Net Gambling Income" value={formatMoney(taxStats.netGambling)} color={taxStats.netGambling >= 0 ? c.green : c.red} sub="Winnings minus losses" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
@@ -3857,14 +3922,41 @@ export default function BettingTracker() {
               ↓ Export Backup
             </button>
             <label style={{ ...btnSecondary, padding: "10px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-              ↑ Restore Backup
+              ↑ Restore File
               <input type="file" accept=".json" onChange={importBackup} style={{ display: "none" }} />
             </label>
+            <button onClick={() => setShowPasteRestore(p => !p)} style={{ ...btnSecondary, padding: "10px 20px", display: "flex", alignItems: "center", gap: 6 }}>
+              📋 Paste JSON
+            </button>
             <span style={{ fontSize: 11, color: c.textDim, marginLeft: 4 }}>
               {bets.length} bets · {expenses.length} expenses · {profiles.length} profile{profiles.length !== 1 ? "s" : ""} · {bankrollEntries.length} books
             </span>
           </div>
+          {showPasteRestore && (
+            <div style={{ marginTop: 16 }}>
+              <textarea value={pasteJson} onChange={e => setPasteJson(e.target.value)} placeholder="Paste your backup JSON here…" style={{ width: "100%", height: 150, background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 8, padding: 12, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={handlePasteRestore} disabled={!pasteJson.trim()} style={{ ...btnPrimary, padding: "8px 18px", fontSize: 12, opacity: pasteJson.trim() ? 1 : 0.4 }}>Restore from Paste</button>
+                <button onClick={() => { setShowPasteRestore(false); setPasteJson(""); }} style={{ ...btnSecondary, padding: "8px 18px", fontSize: 12 }}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* Export JSON viewer (artifact/browser fallback) */}
+        {exportedJson && (
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Backup JSON</h3>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { const ta = document.getElementById("export-json-ta"); if (ta) { ta.focus(); ta.select(); } }} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>Select All</button>
+                <button onClick={() => setExportedJson(null)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>Close</button>
+              </div>
+            </div>
+            <textarea id="export-json-ta" readOnly value={exportedJson} style={{ width: "100%", height: 200, background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 8, padding: 12, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} onFocus={e => e.target.select()} />
+            <p style={{ fontSize: 11, color: c.textDim, margin: "8px 0 0" }}>Click "Select All" then ⌘C to copy. Save as a .json file for backup.</p>
+          </div>
+        )}
 
         {/* Danger Zone */}
         <div style={{ background: "rgba(255,77,106,0.03)", border: `1px solid rgba(255,77,106,0.15)`, borderRadius: 14, padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
