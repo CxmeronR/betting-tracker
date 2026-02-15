@@ -90,7 +90,7 @@ function usePersistedSet(key, defaultValue) {
 }
 
 // ─── VERSION & UPDATE SYSTEM ───
-const APP_VERSION = "1.0.10";
+const APP_VERSION = "1.0.14";
 const VERSION_CHECK_URL = "/version.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // check every 5 min
 
@@ -183,23 +183,24 @@ const inferSportFromEvent = (ev) => {
 
 const normalizeBet = (b) => {
   const isParlay = b.parlay || b.type === "Parlay" || b.type === "Round Robin";
+  const allText = `${b.event || ""} ${b.pick || ""} ${b.league || ""}`;
   if (b.league && b.sport && SPORTS.includes(b.sport)) {
-    // Any bet under "Other" sport — try to infer from event/pick text
     if (b.sport === "Other") {
-      const inferred = inferSportFromEvent(`${b.event || ""} ${b.pick || ""}`);
+      const inferred = inferSportFromEvent(allText);
       if (inferred) return { ...b, ...inferred };
-      if (isParlay && b.league === "Other") return { ...b, league: "Multi-Sport Parlay" };
+      if (isParlay && (b.league === "Other" || b.league.length > 30)) return { ...b, league: "Multi-Sport Parlay" };
+      if (b.league.length > 30) return { ...b, league: "Other" };
     }
     return b;
   }
-  // Old format: b.sport contains a league name like "NFL"
   const raw = b.league || b.sport || "Other";
   let league = raw;
   let sport = LEAGUE_TO_SPORT[raw] || (SPORTS.includes(raw) ? raw : "Other");
   if (sport === "Other") {
-    const inferred = inferSportFromEvent(`${b.event || ""} ${b.pick || ""}`);
+    const inferred = inferSportFromEvent(allText);
     if (inferred) return { ...b, ...inferred };
-    if (isParlay && league === "Other") league = "Multi-Sport Parlay";
+    if (isParlay && (league === "Other" || league.length > 30)) league = "Multi-Sport Parlay";
+    else if (league.length > 30) league = "Other";
   }
   return { ...b, league, sport };
 };
@@ -494,8 +495,13 @@ export default function BettingTracker() {
     const losses = betsList.filter(b => b.result === "lost").length;
     const graded = wins + losses; // exclude pushes from win rate denominator
     const roi = totalStake ? (totalProfit / totalStake) * 100 : 0;
-    const clvEligible = betsList.filter(b => !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin");
-    const clvBets = clvEligible.map(b => ({ ...b, clv: ((impliedProb(b.closingOdds) - impliedProb(b.odds)) / impliedProb(b.odds)) * 100 }));
+    const clvEligible = betsList.filter(b => !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin" && b.odds !== 0 && b.closingOdds !== 0);
+    const clvBets = clvEligible.map(b => {
+      const openProb = impliedProb(b.odds);
+      const closeProb = impliedProb(b.closingOdds);
+      const clv = openProb > 0 ? ((closeProb - openProb) / openProb) * 100 : 0;
+      return { ...b, clv: isFinite(clv) ? clv : 0 };
+    });
     const avgCLV = clvBets.length ? clvBets.reduce((s, b) => s + b.clv, 0) / clvBets.length : 0;
     const dailyPL = {};
     betsList.forEach(b => { dailyPL[b.date] = (dailyPL[b.date] || 0) + b.profit; });
@@ -590,7 +596,7 @@ export default function BettingTracker() {
   const evStats = useMemo(() => {
     const LIVE_EV_EDGE = 0.05; // assumed 5% edge on live bets
     // Pre-game with real closing lines (exclude parlays, RR, and fabricated CLV)
-    const preGame = filtered.filter(b => b.type !== "Live" && !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin");
+    const preGame = filtered.filter(b => b.type !== "Live" && !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin" && b.odds !== 0 && b.closingOdds !== 0);
     const live = filtered.filter(b => b.type === "Live");
 
     // Pre-game: EV derived from CLV
@@ -599,8 +605,8 @@ export default function BettingTracker() {
     const preGameAnalysis = preGame.map(b => {
       const openProb = impliedProb(b.odds);
       const closeProb = impliedProb(b.closingOdds);
-      const clvPct = (closeProb - openProb) / openProb; // decimal, e.g. 0.03 = 3%
-      const expectedProfit = clvPct * b.stake;
+      const clvPct = openProb > 0 ? (closeProb - openProb) / openProb : 0;
+      const expectedProfit = isFinite(clvPct) ? clvPct * b.stake : 0;
       return { ...b, isLive: false, clvPct, expectedProfit, actualProfit: b.profit, variance: b.profit - expectedProfit };
     });
 
@@ -4148,7 +4154,7 @@ export default function BettingTracker() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, background: c.card, zIndex: 2 }}><tr>{["Date", "League", "Event", "Pick", "Type", "Odds", "Close", "CLV", "Stake", "Book", "Result", "P&L"].map(h => <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: c.textDim, fontWeight: 500, borderBottom: `1px solid ${c.borderLight}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(b => {
-            const clv = ((impliedProb(b.closingOdds) - impliedProb(b.odds)) / impliedProb(b.odds)) * 100;
+            const clvOpen = impliedProb(b.odds); const clv = clvOpen > 0 && b.closingOdds !== 0 ? ((impliedProb(b.closingOdds) - clvOpen) / clvOpen) * 100 : 0;
             return (
               <tr key={b.id} style={{ borderBottom: `1px solid ${c.border}08` }}>
                 <td style={{ padding: "8px", color: c.textDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{b.date}</td>
