@@ -90,7 +90,7 @@ function usePersistedSet(key, defaultValue) {
 }
 
 // ─── VERSION & UPDATE SYSTEM ───
-const APP_VERSION = "1.0.14";
+const APP_VERSION = "1.0.17";
 const VERSION_CHECK_URL = "/version.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // check every 5 min
 
@@ -992,7 +992,7 @@ export default function BettingTracker() {
           pos.sell_proceeds += usdc;
           if (pos.tokens < 0.01) {
             const profit = pos.sell_proceeds - pos.stake;
-            settled.push({ market, token, stake: pos.stake, payout: pos.sell_proceeds, profit, result: "push", ts: rowTs, open_ts: pos.first_ts, avgPrice: pos.stake / (pos.stake + profit) || 0 });
+            settled.push({ market, token, stake: pos.stake, payout: pos.sell_proceeds, profit, result: profit >= 0 ? "won" : "lost", ts: rowTs, open_ts: pos.first_ts, avgPrice: pos.tokens > 0 ? pos.stake / (pos.tokens + tkns) : 0 });
             delete positions[key];
           }
         }
@@ -1011,13 +1011,15 @@ export default function BettingTracker() {
       }
     }
 
+    // Remaining positions with no Redeem/Sell = lost (tokens expired worthless)
+    Object.entries(positions).forEach(([key, pos]) => {
+      settled.push({ market: pos.market, token: pos.token, stake: pos.stake, payout: 0, profit: -pos.stake, result: "lost", ts: pos.first_ts, open_ts: pos.first_ts, avgPrice: pos.tokens > 0 ? pos.stake / pos.tokens : 0 });
+    });
+
     // Convert settled positions to bet objects (always profile: "cameron")
     let imported = 0;
-    const existingBids = new Set(bets.filter(b => b.bid).map(b => b.bid));
     const newBets = settled.map((s, i) => {
       const bid = `poly_${s.open_ts}_${i}`;
-      if (existingBids.has(bid)) return null;
-      existingBids.add(bid);
       // Parse bet type from market name
       let betType = "Moneyline", event = s.market, pick = s.token;
       if (/O\/U\s+[\d.]+/i.test(s.market)) betType = "Over/Under";
@@ -1043,21 +1045,18 @@ export default function BettingTracker() {
         profit: Math.round(s.profit * 100) / 100,
         sportsbook: "Polymarket", profile: "cameron",
         noClosingLine: true,
-        ...(s.result === "push" && { cashOut: true }),
       };
     }).filter(Boolean);
 
-    const openCount = Object.keys(positions).length;
-    const openExposure = Object.values(positions).reduce((s, p) => s + p.stake, 0);
-
     if (newBets.length > 0) {
-      setBets(prev => [...prev, ...newBets].sort((a, b) => a.date.localeCompare(b.date)));
-      const parts = [`Imported ${imported} Polymarket positions`];
-      parts.push(`${settled.filter(s => s.result === "won").length}W ${settled.filter(s => s.result === "lost").length}L ${settled.filter(s => s.result === "push").length} cash-outs`);
-      if (openCount > 0) parts.push(`${openCount} open ($${openExposure.toFixed(0)} exposure) skipped`);
-      setImportStatus({ type: "success", message: parts.join(" · ") });
+      // Remove any existing Polymarket bets first (allows clean reimport)
+      setBets(prev => [...prev.filter(b => b.sportsbook !== "Polymarket"), ...newBets].sort((a, b) => a.date.localeCompare(b.date)));
+      const wins = settled.filter(s => s.result === "won").length;
+      const losses = settled.filter(s => s.result === "lost").length;
+      const totalPL = settled.reduce((s, p) => s + p.profit, 0);
+      setImportStatus({ type: "success", message: `Imported ${imported} Polymarket positions · ${wins}W ${losses}L · P&L: $${totalPL >= 0 ? "+" : ""}${totalPL.toFixed(2)}` });
     } else {
-      setImportStatus({ type: "error", message: openCount > 0 ? `No settled positions found (${openCount} still open)` : "No positions found in CSV" });
+      setImportStatus({ type: "error", message: "No positions found in CSV" });
     }
     setCsvText(""); setCsvPreview(null);
     setTimeout(() => setImportStatus(null), 6000);
