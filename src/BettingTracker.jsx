@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 
 // ─── PERSISTED KEYS REGISTRY ───
-const PERSISTED_KEYS = ["bets", "expenses", "profiles", "activeProfile", "bankrollEntries", "bankrollHistory", "expensesPaidManual", "bankBalances", "jan1Bankrolls", "profileNotes", "bookLimits", "apiEndpoints", "w2gDocuments", "expenseReceipts", "taxOtherIncome", "taxFilingStatus", "profitGoals", "freeBetMode"];
+const PERSISTED_KEYS = ["bets", "expenses", "profiles", "activeProfile", "bankrollEntries", "bankrollHistory", "expensesPaidManual", "bankBalances", "jan1Bankrolls", "profileNotes", "bookLimits", "apiEndpoints", "w2gDocuments", "expenseReceipts", "taxOtherIncome", "taxFilingStatus", "vaultPinHash", "vaultData", "profitSplits", "sgpApiKey", "sgpSavedCombos"];
 
 // ─── PERSISTENCE HOOK — cloud-first with localStorage cache ───
 function usePersistedState(key, defaultValue) {
@@ -90,7 +90,7 @@ function usePersistedSet(key, defaultValue) {
 }
 
 // ─── VERSION & UPDATE SYSTEM ───
-const APP_VERSION = "1.0.17";
+const APP_VERSION = "1.0.0";
 const VERSION_CHECK_URL = "/version.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000; // check every 5 min
 
@@ -146,7 +146,7 @@ const LEAGUES = {
   Tennis: ["ATP", "WTA", "Grand Slam"],
   MMA: ["UFC", "Bellator", "PFL", "ONE"],
   Golf: ["PGA", "LIV", "LPGA", "DP World"],
-  Other: ["Multi-Sport Parlay"],
+  Other: [],
 };
 const ALL_LEAGUES = Object.values(LEAGUES).flat();
 const LEAGUE_TO_SPORT = {};
@@ -155,56 +155,15 @@ Object.entries(LEAGUES).forEach(([sport, leagues]) => leagues.forEach(l => { LEA
 SPORTS.forEach(s => { if (!LEAGUE_TO_SPORT[s]) LEAGUE_TO_SPORT[s] = s; });
 
 // Normalize a bet object — adds league/sport fields if missing, handles old format
-const MMA_KW = /\bfight time\b|\bround\b.*\bover\b|\bmethod of victory\b|\bdecision\b|\bko\b|\btko\b|\bsubmission\b|\bknockout\b/i;
-
-const inferSportFromEvent = (ev) => {
-  if (!ev) return null;
-  const upper = ev.toUpperCase();
-  // MMA detection
-  if (MMA_KW.test(ev)) return { sport: "MMA", league: "UFC" };
-  if (/vs\.\s*[A-Z][a-z]+ [A-Z][a-z]+/.test(ev) && /fight|bout|round|mins/i.test(ev)) return { sport: "MMA", league: "UFC" };
-  // Count distinct team matches using global regex
-  const countTeams = (re) => new Set((upper.match(re) || [])).size;
-  const nba = countTeams(/\b(ATL|BOS|BKN|CHA|CHI|CLE|DAL|DEN|DET|GSW|HOU|IND|LAC|LAL|MEM|MIA|MIL|MIN|NOP|NYK|OKC|ORL|PHI|PHX|POR|SAC|SAS|TOR|UTA|WAS)\b/g);
-  if (nba >= 2) return { sport: "Basketball", league: "NBA" };
-  const nfl = countTeams(/\b(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)\b/g);
-  if (nfl >= 2) return { sport: "Football", league: "NFL" };
-  const nhl = countTeams(/\b(ANA|ARI|BOS|BUF|CAR|CBJ|CGY|CHI|COL|DAL|DET|EDM|FLA|LA|MIN|MTL|NJ|NSH|NYI|NYR|OTT|PHI|PIT|SEA|SJ|STL|TB|TOR|VAN|VGK|WPG|WSH)\b/g);
-  if (nhl >= 2) return { sport: "Hockey", league: "NHL" };
-  const mlb = countTeams(/\b(ARI|ATL|BAL|BOS|CHC|CHW|CIN|CLE|COL|DET|HOU|KC|LAA|LAD|MIA|MIL|MIN|NYM|NYY|OAK|PHI|PIT|SD|SF|SEA|STL|TB|TEX|TOR|WSH)\b/g);
-  if (mlb >= 2) return { sport: "Baseball", league: "MLB" };
-  // Single team code — still useful for props
-  if (nba >= 1) return { sport: "Basketball", league: "NBA" };
-  if (nfl >= 1) return { sport: "Football", league: "NFL" };
-  if (nhl >= 1) return { sport: "Hockey", league: "NHL" };
-  if (mlb >= 1) return { sport: "Baseball", league: "MLB" };
-  return null;
-};
-
 const normalizeBet = (b) => {
-  const isParlay = b.parlay || b.type === "Parlay" || b.type === "Round Robin";
-  const allText = `${b.event || ""} ${b.pick || ""} ${b.league || ""}`;
-  if (b.league && b.sport && SPORTS.includes(b.sport)) {
-    if (b.sport === "Other") {
-      const inferred = inferSportFromEvent(allText);
-      if (inferred) return { ...b, ...inferred };
-      if (isParlay && (b.league === "Other" || b.league.length > 30)) return { ...b, league: "Multi-Sport Parlay" };
-      if (b.league.length > 30) return { ...b, league: "Other" };
-    }
-    return b;
-  }
+  if (b.league && b.sport && SPORTS.includes(b.sport)) return b; // already normalized
+  // Old format: b.sport contains a league name like "NFL"
   const raw = b.league || b.sport || "Other";
-  let league = raw;
-  let sport = LEAGUE_TO_SPORT[raw] || (SPORTS.includes(raw) ? raw : "Other");
-  if (sport === "Other") {
-    const inferred = inferSportFromEvent(allText);
-    if (inferred) return { ...b, ...inferred };
-    if (isParlay && (league === "Other" || league.length > 30)) league = "Multi-Sport Parlay";
-    else if (league.length > 30) league = "Other";
-  }
+  const league = raw;
+  const sport = LEAGUE_TO_SPORT[raw] || (SPORTS.includes(raw) ? raw : "Other");
   return { ...b, league, sport };
 };
-const BET_TYPES = ["Moneyline", "Spread", "Over/Under", "Parlay", "Round Robin", "Prop", "Futures", "Live"];
+const BET_TYPES = ["Moneyline", "Spread", "Over/Under", "Parlay", "Prop", "Futures", "Live"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS_HEADER = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -320,10 +279,6 @@ export default function BettingTracker() {
   const [taxFilingStatus, setTaxFilingStatus] = usePersistedState("taxFilingStatus", "single");
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
   const [dashYear, setDashYear] = useState(String(new Date().getFullYear()));
-  const [profitGoals, setProfitGoals] = usePersistedState("profitGoals", {}); // { "2026": { goal: 100000, targetMonth: 12 } }
-  const [freeBetMode, setFreeBetMode] = usePersistedState("freeBetMode", "exclude"); // "exclude" | "include" — how to treat free bet losses
-  const [showGoalEditor, setShowGoalEditor] = useState(false);
-  const [goalForm, setGoalForm] = useState({ year: String(new Date().getFullYear()), goal: "", targetMonth: "12" });
   const [hoveredCumIdx, setHoveredCumIdx] = useState(null);
   const [evFocus, setEvFocus] = useState("combined"); // "pregame" | "live" | "combined"
   const [mcSeed, setMcSeed] = useState(42);
@@ -403,6 +358,62 @@ export default function BettingTracker() {
   // ─── RECEIPT ATTACHMENTS (keyed by expense id) ───
   const [expenseReceipts, setExpenseReceipts] = usePersistedState("expenseReceipts", {});
 
+  // ─── ENCRYPTED VAULT ───
+  const [vaultPin, setVaultPin] = useState("");
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [vaultPinHash, setVaultPinHash] = usePersistedState("vaultPinHash", null);
+  const [vaultData, setVaultData] = usePersistedState("vaultData", null); // encrypted string
+  const [vaultItems, setVaultItems] = useState([]); // decrypted in-memory only
+  const [showVaultAdd, setShowVaultAdd] = useState(false);
+  const [vaultForm, setVaultForm] = useState({ label: "", username: "", password: "", phone: "", notes: "" });
+  const [showVaultPinSetup, setShowVaultPinSetup] = useState(false);
+  const [vaultPinInput, setVaultPinInput] = useState("");
+  const [vaultPinConfirm, setVaultPinConfirm] = useState("");
+  const [vaultError, setVaultError] = useState("");
+  const [revealedVault, setRevealedVault] = useState(new Set());
+
+  // Vault crypto helpers
+  const vaultCrypto = useMemo(() => ({
+    hash: async (pin) => {
+      const enc = new TextEncoder().encode(pin);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return btoa(String.fromCharCode(...new Uint8Array(hash)));
+    },
+    deriveKey: async (pin) => {
+      const enc = new TextEncoder().encode(pin);
+      const keyMaterial = await crypto.subtle.importKey('raw', enc, 'PBKDF2', false, ['deriveKey']);
+      return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: new TextEncoder().encode('betting-vault-salt'), iterations: 100000, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    },
+    encrypt: async (pin, data) => {
+      const key = await vaultCrypto.deriveKey(pin);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(data)));
+      return JSON.stringify({ iv: btoa(String.fromCharCode(...iv)), data: btoa(String.fromCharCode(...new Uint8Array(encrypted))) });
+    },
+    decrypt: async (pin, encStr) => {
+      try {
+        const { iv, data } = JSON.parse(encStr);
+        const key = await vaultCrypto.deriveKey(pin);
+        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(iv), c => c.charCodeAt(0)) }, key, Uint8Array.from(atob(data), c => c.charCodeAt(0)));
+        return JSON.parse(new TextDecoder().decode(decrypted));
+      } catch { return null; }
+    }
+  }), []);
+
+  // ─── PROFIT SPLITS ───
+  const [profitSplits, setProfitSplits] = usePersistedState("profitSplits", {}); // { profileId: { pct: 40, override: null, payments: [{date, amount, note}] } }
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: "", note: "" });
+
+  // ─── SGP EDGE FINDER ───
+  const [sgpApiKey, setSgpApiKey] = usePersistedState("sgpApiKey", "");
+  const [sgpSport, setSgpSport] = useState("nba");
+  const [sgpResults, setSgpResults] = useState(null);
+  const [sgpLoading, setSgpLoading] = useState(false);
+  const [sgpSavedCombos, setSgpSavedCombos] = usePersistedState("sgpSavedCombos", []);
+
+  // ─── MOBILE RECEIPT CAPTURE (future companion app) ───
+
   // ─── EXPORT ───
   const [accountingExportYear, setAccountingExportYear] = useState(String(new Date().getFullYear()));
 
@@ -413,23 +424,12 @@ export default function BettingTracker() {
   const swRegistrationRef = useRef(null);
 
   useEffect(() => {
-    let cleanupElectron;
-
-    // ── Electron auto-updater listener ──
-    if (window.electronAPI?.onUpdateStatus) {
-      cleanupElectron = window.electronAPI.onUpdateStatus((data) => {
-        if (data.status === "available" && data.version) {
-          setUpdateAvailable({ version: data.version, notes: data.releaseNotes || "New version available.", downloadUrl: data.downloadUrl });
-          setUpdateDismissed(false);
-        }
-      });
-    }
-
     // 1. Register service worker
     registerServiceWorker().then(reg => { swRegistrationRef.current = reg; });
 
     // 2. Listen for SW-level update detection
     const handleSWUpdate = () => {
+      // SW found a new version — trigger version.json check too
       checkVersionEndpoint().then(data => {
         if (data && semverCompare(data.version, APP_VERSION) > 0) {
           setUpdateAvailable(data);
@@ -457,7 +457,6 @@ export default function BettingTracker() {
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      if (cleanupElectron) cleanupElectron();
       window.removeEventListener("sw-update-available", handleSWUpdate);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearInterval(interval);
@@ -465,43 +464,23 @@ export default function BettingTracker() {
   }, []);
 
   const applyUpdate = useCallback(() => {
-    // Electron: open DMG download in browser
-    if (window.electronAPI?.installUpdate) {
-      window.electronAPI.installUpdate(updateAvailable?.downloadUrl);
-      return;
-    }
-    // Web/artifact: tell waiting SW to take over, then reload
+    // Tell waiting SW to take over, then reload
     if (swRegistrationRef.current?.waiting) {
       swRegistrationRef.current.waiting.postMessage("SKIP_WAITING");
     }
+    // Small delay to let SW activate before reload
     setTimeout(() => window.location.reload(), 300);
-  }, [updateAvailable]);
+  }, []);
 
   const filtered = useMemo(() => bets.map(normalizeBet).filter(b => (activeProfile === "all" || (b.profile || profiles[0]?.id) === activeProfile) && (filterSport === "All" || b.sport === filterSport) && (filterLeague === "All" || b.league === filterLeague) && (filterType === "All" || b.type === filterType)), [bets, filterSport, filterLeague, filterType, activeProfile]);
-
-  // Profile-only filtered bets (no sport/league/type filter) for calendar, monthly charts, goal
-  const profileBets = useMemo(() => bets.map(normalizeBet).filter(b => activeProfile === "all" || (b.profile || profiles[0]?.id) === activeProfile), [bets, activeProfile]);
 
   // Reusable stats computation
   const computeStats = (betsList) => {
     const totalStake = betsList.reduce((s, b) => s + b.stake, 0);
     const totalProfit = betsList.reduce((s, b) => s + b.profit, 0);
-    // Free bet adjusted profit: exclude losses on free bets (wins still count)
-    const freeBetLosses = betsList.filter(b => b.freeBet && b.result === "lost").reduce((s, b) => s + b.profit, 0);
-    const freeBetCount = betsList.filter(b => b.freeBet).length;
-    const adjustedProfit = totalProfit - freeBetLosses; // removes negative losses = adds them back
     const wins = betsList.filter(b => b.result === "won").length;
-    const pushes = betsList.filter(b => b.result === "push").length;
-    const losses = betsList.filter(b => b.result === "lost").length;
-    const graded = wins + losses; // exclude pushes from win rate denominator
     const roi = totalStake ? (totalProfit / totalStake) * 100 : 0;
-    const clvEligible = betsList.filter(b => !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin" && b.odds !== 0 && b.closingOdds !== 0);
-    const clvBets = clvEligible.map(b => {
-      const openProb = impliedProb(b.odds);
-      const closeProb = impliedProb(b.closingOdds);
-      const clv = openProb > 0 ? ((closeProb - openProb) / openProb) * 100 : 0;
-      return { ...b, clv: isFinite(clv) ? clv : 0 };
-    });
+    const clvBets = betsList.map(b => ({ ...b, clv: ((impliedProb(b.closingOdds) - impliedProb(b.odds)) / impliedProb(b.odds)) * 100 }));
     const avgCLV = clvBets.length ? clvBets.reduce((s, b) => s + b.clv, 0) / clvBets.length : 0;
     const dailyPL = {};
     betsList.forEach(b => { dailyPL[b.date] = (dailyPL[b.date] || 0) + b.profit; });
@@ -511,28 +490,24 @@ export default function BettingTracker() {
     betsList.forEach(b => {
       const league = b.league || b.sport || "Other";
       const sport = b.sport || "Other";
-      if (!byLeague[league]) byLeague[league] = { profit: 0, count: 0, wins: 0, pushes: 0, stake: 0, sport };
+      if (!byLeague[league]) byLeague[league] = { profit: 0, count: 0, wins: 0, stake: 0, sport };
       byLeague[league].profit += b.profit; byLeague[league].count++; byLeague[league].stake += b.stake;
       if (b.result === "won") byLeague[league].wins++;
-      if (b.result === "push") byLeague[league].pushes++;
-      if (!bySport[sport]) bySport[sport] = { profit: 0, count: 0, wins: 0, pushes: 0, stake: 0 };
+      if (!bySport[sport]) bySport[sport] = { profit: 0, count: 0, wins: 0, stake: 0 };
       bySport[sport].profit += b.profit; bySport[sport].count++; bySport[sport].stake += b.stake;
       if (b.result === "won") bySport[sport].wins++;
-      if (b.result === "push") bySport[sport].pushes++;
       if (!byBook[b.sportsbook]) byBook[b.sportsbook] = { profit: 0, count: 0 };
       byBook[b.sportsbook].profit += b.profit; byBook[b.sportsbook].count++;
     });
     let streak = 0, streakType = "";
     for (let i = betsList.length - 1; i >= 0; i--) {
-      if (betsList[i].result === "push") continue; // skip pushes in streak calc
-      if (!streakType) { streakType = betsList[i].result; streak = 1; }
-      else if (betsList[i].result === streakType) streak++;
-      else break;
+      if (i === betsList.length - 1) { streakType = betsList[i].result; streak = 1; }
+      else if (betsList[i].result === streakType) streak++; else break;
     }
     const dayEntries = Object.entries(dailyPL);
     const bestDay = dayEntries.length ? dayEntries.reduce((a, b) => b[1] > a[1] ? b : a) : ["—", 0];
     const worstDay = dayEntries.length ? dayEntries.reduce((a, b) => b[1] < a[1] ? b : a) : ["—", 0];
-    return { total: betsList.length, wins, losses, pushes, winRate: graded ? (wins / graded) * 100 : 0, totalStake, totalProfit, adjustedProfit, freeBetCount, freeBetLosses, roi, avgCLV, clvBets, dailyPL, cumulative, bySport, byLeague, byBook, streak, streakType, bestDay, worstDay, avgStake: betsList.length ? totalStake / betsList.length : 0 };
+    return { total: betsList.length, wins, losses: betsList.length - wins, winRate: betsList.length ? (wins / betsList.length) * 100 : 0, totalStake, totalProfit, roi, avgCLV, clvBets, dailyPL, cumulative, bySport, byLeague, byBook, streak, streakType, bestDay, worstDay, avgStake: betsList.length ? totalStake / betsList.length : 0 };
   };
 
   // Full stats for strategy tab, MC sim, etc.
@@ -555,11 +530,9 @@ export default function BettingTracker() {
   const dashStats = useMemo(() => computeStats(dashFiltered), [dashFiltered]);
 
   const taxStats = useMemo(() => {
-    const allBets = bets.map(normalizeBet);
-    const profBets = activeProfile === "all" ? allBets : allBets.filter(b => (b.profile || profiles[0]?.id) === activeProfile);
-    const taxBets = taxYear === "all" ? profBets : profBets.filter(b => b.date.startsWith(taxYear));
-    const grossWinnings = taxBets.filter(b => b.result === "won").reduce((s, b) => s + b.profit, 0);
-    const totalLosses = taxBets.filter(b => b.result === "lost").reduce((s, b) => s + Math.abs(b.profit), 0);
+    const taxBets = taxYear === "all" ? bets : bets.filter(b => b.date.startsWith(taxYear));
+    const grossWinnings = taxBets.filter(b => b.result === "won").reduce((s, b) => s + b.payout, 0);
+    const totalLosses = taxBets.filter(b => b.result === "lost").reduce((s, b) => s + b.stake, 0);
     const netGambling = grossWinnings - totalLosses;
     const taxableGambling = Math.max(0, netGambling);
     const totalIncome = taxOtherIncome + taxableGambling;
@@ -567,7 +540,7 @@ export default function BettingTracker() {
     const gamblingTax = taxWithGambling - calcTax(taxOtherIncome);
     const effectiveRate = taxableGambling ? (gamblingTax / taxableGambling) * 100 : 0;
     return { grossWinnings, totalLosses, netGambling, taxableGambling, totalIncome, taxWithGambling, gamblingTax, effectiveRate, quarterlyEstimate: gamblingTax / 4, betCount: taxBets.length };
-  }, [bets, taxOtherIncome, taxYear, activeProfile, profiles]);
+  }, [bets, taxOtherIncome, taxYear]);
 
   const expenseStats = useMemo(() => {
     const active = expenses.filter(e => e.active);
@@ -592,11 +565,10 @@ export default function BettingTracker() {
     return { annualized, monthlyBurn, oneTimeTotal, byCategory, netAfterExpenses: stats.totalProfit - annualized, activeCount: active.length, totalCount: expenses.length };
   }, [expenses, stats.totalProfit]);
 
-  // EV & Variance analysis: CLV-based EV for pre-game (with real CLV only), assumed 5% for live
+  // EV & Variance analysis: CLV-based EV for pre-game, assumed 5% for live
   const evStats = useMemo(() => {
     const LIVE_EV_EDGE = 0.05; // assumed 5% edge on live bets
-    // Pre-game with real closing lines (exclude parlays, RR, and fabricated CLV)
-    const preGame = filtered.filter(b => b.type !== "Live" && !b.parlay && !b.noClosingLine && b.type !== "Parlay" && b.type !== "Round Robin" && b.odds !== 0 && b.closingOdds !== 0);
+    const preGame = filtered.filter(b => b.type !== "Live");
     const live = filtered.filter(b => b.type === "Live");
 
     // Pre-game: EV derived from CLV
@@ -605,8 +577,8 @@ export default function BettingTracker() {
     const preGameAnalysis = preGame.map(b => {
       const openProb = impliedProb(b.odds);
       const closeProb = impliedProb(b.closingOdds);
-      const clvPct = openProb > 0 ? (closeProb - openProb) / openProb : 0;
-      const expectedProfit = isFinite(clvPct) ? clvPct * b.stake : 0;
+      const clvPct = (closeProb - openProb) / openProb; // decimal, e.g. 0.03 = 3%
+      const expectedProfit = clvPct * b.stake;
       return { ...b, isLive: false, clvPct, expectedProfit, actualProfit: b.profit, variance: b.profit - expectedProfit };
     });
 
@@ -769,24 +741,23 @@ export default function BettingTracker() {
     for (let i = 0; i < firstDay; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      const dayBets = profileBets.filter(b => b.date === dateStr);
+      const dayBets = bets.filter(b => b.date === dateStr);
       cells.push({ day: d, date: dateStr, bets: dayBets, profit: dayBets.reduce((s, b) => s + b.profit, 0) });
     }
     return cells;
-  }, [profileBets, calMonth, calYear]);
+  }, [bets, calMonth, calYear]);
 
   const maxAbsProfit = useMemo(() => Math.max(1, ...calendarData.filter(Boolean).map(c => Math.abs(c.profit))), [calendarData]);
 
   // Monthly profit data for dashboard charts
   const monthlyData = useMemo(() => {
-    const yearBets = dashYear === "all" ? profileBets : profileBets.filter(b => b.date.startsWith(dashYear));
+    const yearBets = dashYear === "all" ? bets : bets.filter(b => b.date.startsWith(dashYear));
     const byMonth = {};
     yearBets.forEach(b => {
       const key = b.date.slice(0, 7); // YYYY-MM
-      if (!byMonth[key]) byMonth[key] = { profit: 0, bets: 0, wins: 0, pushes: 0, stake: 0 };
+      if (!byMonth[key]) byMonth[key] = { profit: 0, bets: 0, wins: 0, stake: 0 };
       byMonth[key].profit += b.profit; byMonth[key].bets++; byMonth[key].stake += b.stake;
       if (b.result === "won") byMonth[key].wins++;
-      if (b.result === "push") byMonth[key].pushes++;
     });
     const sorted = Object.keys(byMonth).sort();
     let cum = 0;
@@ -794,17 +765,16 @@ export default function BettingTracker() {
       const d = byMonth[key];
       cum += d.profit;
       const [y, m] = key.split("-");
-      const graded = d.bets - d.pushes;
-      return { key, label: `${MONTHS[parseInt(m) - 1]} ${y.slice(2)}`, profit: Math.round(d.profit * 100) / 100, cumulative: Math.round(cum * 100) / 100, bets: d.bets, wins: d.wins, pushes: d.pushes, stake: d.stake, winRate: graded ? (d.wins / graded * 100) : 0, roi: d.stake ? (d.profit / d.stake * 100) : 0 };
+      return { key, label: `${MONTHS[parseInt(m) - 1]} ${y.slice(2)}`, profit: Math.round(d.profit * 100) / 100, cumulative: Math.round(cum * 100) / 100, bets: d.bets, wins: d.wins, stake: d.stake, winRate: d.bets ? (d.wins / d.bets * 100) : 0, roi: d.stake ? (d.profit / d.stake * 100) : 0 };
     });
     return months;
-  }, [profileBets, dashYear]);
+  }, [bets, dashYear]);
 
   // Current month profit for dashboard card
   const currentMonthProfit = useMemo(() => {
     const now = "2026-02"; // current month
-    return profileBets.filter(b => b.date.startsWith(now)).reduce((s, b) => s + b.profit, 0);
-  }, [profileBets]);
+    return bets.filter(b => b.date.startsWith(now)).reduce((s, b) => s + b.profit, 0);
+  }, [bets]);
 
   // Available years for switcher
   const availableYears = useMemo(() => {
@@ -814,92 +784,6 @@ export default function BettingTracker() {
   }, [bets]);
 
   const resetExpenseForm = () => { setExpenseForm({ name: "", category: "software", amount: "", recurrence: "Monthly", startDate: new Date().toISOString().slice(0, 10), notes: "", active: true }); setEditingExpense(null); setShowAddExpense(false); setFormReceipts([]); };
-
-  // ─── PROFIT GOAL PROJECTION ───
-  const goalProjection = useMemo(() => {
-    const year = String(new Date().getFullYear());
-    const goal = profitGoals[year];
-    if (!goal || !goal.goal) return null;
-
-    const targetAmount = goal.goal;
-    const targetMonth = goal.targetMonth || 12; // 1-12
-    const now = new Date();
-
-    // Year boundaries
-    const yearStart = new Date(parseInt(year), 0, 1);
-    const targetEnd = new Date(parseInt(year), targetMonth, 0); // last day of target month
-    const totalDays = Math.ceil((targetEnd - yearStart) / 86400000);
-    const elapsedDays = Math.max(1, Math.ceil((now - yearStart) / 86400000));
-    const remainingDays = Math.max(0, Math.ceil((targetEnd - now) / 86400000));
-
-    // Current year bets (using free bet mode)
-    const yearBets = profileBets.filter(b => b.date.startsWith(year));
-    const currentProfit = freeBetMode === "exclude"
-      ? yearBets.reduce((s, b) => s + (b.freeBet && b.result === "lost" ? 0 : b.profit), 0)
-      : yearBets.reduce((s, b) => s + b.profit, 0);
-
-    // Daily rate
-    const dailyRate = currentProfit / elapsedDays;
-    const projectedTotal = dailyRate * totalDays;
-    const neededRemaining = targetAmount - currentProfit;
-    const neededDailyRate = remainingDays > 0 ? neededRemaining / remainingDays : Infinity;
-    const pctComplete = Math.min(100, (currentProfit / targetAmount) * 100);
-    const pctTimeElapsed = (elapsedDays / totalDays) * 100;
-    const onPace = currentProfit >= (dailyRate > 0 ? targetAmount * (elapsedDays / totalDays) : 0);
-    const goalPace = targetAmount * (elapsedDays / totalDays);
-
-    // Forward Monte Carlo: simulate remaining betting period
-    const realBets = yearBets.filter(b => b.result !== "push" && !(b.freeBet && b.result === "lost"));
-    const wins = realBets.filter(b => b.result === "won");
-    const losses = realBets.filter(b => b.result === "lost");
-    if (realBets.length < 10 || remainingDays <= 0) {
-      return {
-        targetAmount, targetMonth, currentProfit, dailyRate, projectedTotal,
-        neededRemaining, neededDailyRate, pctComplete, pctTimeElapsed, onPace, goalPace,
-        elapsedDays, remainingDays, totalDays, yearBets: yearBets.length,
-        mc: null,
-      };
-    }
-
-    const wr = wins.length / realBets.length;
-    const avgWin = wins.reduce((s, b) => s + b.profit, 0) / (wins.length || 1);
-    const avgLoss = losses.reduce((s, b) => s + b.profit, 0) / (losses.length || 1);
-    const betsPerDay = realBets.length / elapsedDays;
-    const remainingBets = Math.round(betsPerDay * remainingDays);
-    // Variance of single bet
-    const singleBetVar = realBets.reduce((s, b) => s + Math.pow(b.profit - (wr * avgWin + (1 - wr) * avgLoss), 2), 0) / realBets.length;
-    const singleBetStd = Math.sqrt(singleBetVar);
-
-    const sims = 3000;
-    const finals = [];
-    let s = 7919; // seed
-    const rand = () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-
-    for (let sim = 0; sim < sims; sim++) {
-      let total = currentProfit;
-      for (let j = 0; j < remainingBets; j++) {
-        total += rand() < wr ? avgWin : avgLoss;
-      }
-      finals.push(total);
-    }
-    finals.sort((a, b) => a - b);
-    const p5 = finals[Math.floor(sims * 0.05)];
-    const p25 = finals[Math.floor(sims * 0.25)];
-    const p50 = finals[Math.floor(sims * 0.50)];
-    const p75 = finals[Math.floor(sims * 0.75)];
-    const p95 = finals[Math.floor(sims * 0.95)];
-    const hitGoalPct = (finals.filter(v => v >= targetAmount).length / sims * 100);
-
-    // New projected annual if beating goal
-    const newProjected = p50;
-
-    return {
-      targetAmount, targetMonth, currentProfit, dailyRate, projectedTotal,
-      neededRemaining, neededDailyRate, pctComplete, pctTimeElapsed, onPace, goalPace,
-      elapsedDays, remainingDays, totalDays, yearBets: yearBets.length,
-      mc: { p5, p25, p50, p75, p95, hitGoalPct, remainingBets, sims, wr, avgWin, avgLoss, singleBetStd, newProjected, finals },
-    };
-  }, [profileBets, profitGoals, freeBetMode]);
   const [formReceipts, setFormReceipts] = useState([]); // temp receipts for current form
   const handleFormReceiptUpload = (e) => {
     Array.from(e.target.files || []).forEach(file => {
@@ -958,113 +842,6 @@ export default function BettingTracker() {
 
   // Detect if CSV matches the user's transaction format
   const isTransactionCSV = (headers) => headers.includes("bet_id") && headers.includes("status") && headers.includes("bet_info");
-
-  // Detect Polymarket CSV format
-  const isPolymarketCSV = (headers) => { const lc = headers.map(h => h.toLowerCase()); return lc.includes("marketname") && lc.includes("action") && lc.includes("usdcamount") && lc.includes("tokenamount"); };
-
-  // Polymarket import — aggregates Buy/Sell/Redeem into settled positions
-  const autoImportPolymarket = (parsed) => {
-    const ts = Date.now();
-    // Normalize header keys to lowercase for consistent access
-    const rows = [...parsed.rows].map(row => {
-      const norm = {};
-      Object.entries(row).forEach(([k, v]) => { norm[k.toLowerCase()] = v; });
-      return norm;
-    }).sort((a, b) => parseInt(a.timestamp || 0) - parseInt(b.timestamp || 0));
-    const positions = {}; // (market|token) → { stake, tokens, first_ts, sell_proceeds }
-    const settled = [];
-
-    for (const row of rows) {
-      const action = (row.action || "").trim();
-      const market = (row.marketname || "").trim();
-      const token = (row.tokenname || "").trim();
-      const usdc = Math.abs(parseFloat(row.usdcamount) || 0);
-      const tkns = parseFloat(row.tokenamount) || 0;
-      const rowTs = parseInt(row.timestamp) || 0;
-      if (action === "Deposit" || !market) continue;
-
-      const key = `${market}|${token}`;
-
-      if (action === "Buy") {
-        if (!positions[key]) positions[key] = { stake: 0, tokens: 0, first_ts: rowTs, sell_proceeds: 0, market, token };
-        positions[key].stake += usdc;
-        positions[key].tokens += tkns;
-      } else if (action === "Sell") {
-        if (positions[key]) {
-          const pos = positions[key];
-          pos.tokens -= tkns;
-          pos.sell_proceeds += usdc;
-          if (pos.tokens < 0.01) {
-            const profit = pos.sell_proceeds - pos.stake;
-            settled.push({ market, token, stake: pos.stake, payout: pos.sell_proceeds, profit, result: profit >= 0 ? "won" : "lost", ts: rowTs, open_ts: pos.first_ts, avgPrice: pos.tokens > 0 ? pos.stake / (pos.tokens + tkns) : 0 });
-            delete positions[key];
-          }
-        }
-      } else if (action === "Redeem") {
-        // Redeems have no token name — match by market
-        const matching = Object.entries(positions).filter(([k]) => k.startsWith(market + "|"));
-        if (matching.length > 0) {
-          const [mKey, pos] = matching[0];
-          if (usdc > 0) {
-            settled.push({ market, token: pos.token, stake: pos.stake, payout: usdc, profit: usdc - pos.stake, result: "won", ts: rowTs, open_ts: pos.first_ts, avgPrice: pos.stake / pos.tokens || 0 });
-          } else {
-            settled.push({ market, token: pos.token, stake: pos.stake, payout: 0, profit: -pos.stake, result: "lost", ts: rowTs, open_ts: pos.first_ts, avgPrice: pos.stake / pos.tokens || 0 });
-          }
-          delete positions[mKey];
-        }
-      }
-    }
-
-    // Remaining positions with no Redeem/Sell = lost (tokens expired worthless)
-    Object.entries(positions).forEach(([key, pos]) => {
-      settled.push({ market: pos.market, token: pos.token, stake: pos.stake, payout: 0, profit: -pos.stake, result: "lost", ts: pos.first_ts, open_ts: pos.first_ts, avgPrice: pos.tokens > 0 ? pos.stake / pos.tokens : 0 });
-    });
-
-    // Convert settled positions to bet objects (always profile: "cameron")
-    let imported = 0;
-    const newBets = settled.map((s, i) => {
-      const bid = `poly_${s.open_ts}_${i}`;
-      // Parse bet type from market name
-      let betType = "Moneyline", event = s.market, pick = s.token;
-      if (/O\/U\s+[\d.]+/i.test(s.market)) betType = "Over/Under";
-      else if (/Spread/i.test(s.market)) betType = "Spread";
-      else if (/1H\s+O\/U/i.test(s.market)) betType = "Over/Under";
-      // Detect sport from market name
-      const marketLower = s.market.toLowerCase();
-      let sport = "Other", league = "Other";
-      if (/nba|celtics|knicks|cavaliers|pacers|warriors|timberwolves|thunder|spurs|trail blazers|kings|bulls|lakers|nets|heat|hawks|rockets|grizzlies|suns|nuggets|bucks|clippers|76ers|pistons|magic|raptors|wizards|hornets|jazz|pelicans/i.test(marketLower)) { sport = "Basketball"; league = "NBA"; }
-      else if (/nfl|patriots|bills|seahawks|rams|bears|ravens|steelers|panthers|buccaneers|falcons|eagles|chiefs|49ers|cowboys|packers|dolphins|jets|broncos|raiders|chargers|bengals|browns|texans|colts|jaguars|titans|lions|vikings|saints|cardinals|commanders/i.test(marketLower)) { sport = "Football"; league = "NFL"; }
-      else if (/nhl|devils|rangers|bruins|maple leafs|canadiens|senators|penguins|flyers|capitals|hurricanes|blue jackets|islanders|panthers|lightning|red wings|sabres|jets|wild|predators|blackhawks|avalanche|blues|stars|kraken|flames|oilers|canucks|sharks|knights|coyotes|ducks|kings/i.test(marketLower)) { sport = "Hockey"; league = "NHL"; }
-      else if (/ncaa|volunteers|crimson|hawkeyes|buckeyes|trojans|texans.*thunderbirds|ohio state|usc|iowa|alabama|tennessee/i.test(marketLower)) { sport = marketLower.includes("basket") || /O\/U\s+[12]\d{2}/i.test(s.market) ? "Basketball" : "Football"; league = sport === "Basketball" ? "NCAAB" : "NCAAF"; }
-      // Decimal odds from avg price (price = cost per token, odds = 1/price)
-      const decOdds = s.avgPrice > 0 && s.avgPrice < 1 ? 1 / s.avgPrice : 0;
-      const americanOdds = decOdds > 1 ? decToAmerican(decOdds) : 0;
-      // EST date from unix timestamp
-      const estDate = new Date((s.open_ts - 5 * 3600) * 1000).toISOString().slice(0, 10);
-      imported++;
-      return {
-        bid, id: ts + i, date: estDate, sport, league, type: betType,
-        event, pick, odds: americanOdds, closingOdds: 0, stake: Math.round(s.stake * 100) / 100,
-        result: s.result, payout: s.result === "won" ? Math.round(s.payout * 100) / 100 : 0,
-        profit: Math.round(s.profit * 100) / 100,
-        sportsbook: "Polymarket", profile: "cameron",
-        noClosingLine: true,
-      };
-    }).filter(Boolean);
-
-    if (newBets.length > 0) {
-      // Remove any existing Polymarket bets first (allows clean reimport)
-      setBets(prev => [...prev.filter(b => b.sportsbook !== "Polymarket"), ...newBets].sort((a, b) => a.date.localeCompare(b.date)));
-      const wins = settled.filter(s => s.result === "won").length;
-      const losses = settled.filter(s => s.result === "lost").length;
-      const totalPL = settled.reduce((s, p) => s + p.profit, 0);
-      setImportStatus({ type: "success", message: `Imported ${imported} Polymarket positions · ${wins}W ${losses}L · P&L: $${totalPL >= 0 ? "+" : ""}${totalPL.toFixed(2)}` });
-    } else {
-      setImportStatus({ type: "error", message: "No positions found in CSV" });
-    }
-    setCsvText(""); setCsvPreview(null);
-    setTimeout(() => setImportStatus(null), 6000);
-  };
 
   // Comprehensive live detection — multiple heuristics
   const detectLive = (row) => {
@@ -1165,8 +942,6 @@ export default function BettingTracker() {
       if (!parsed) { setImportStatus({ type: "error", message: "Could not parse file" }); setTimeout(() => setImportStatus(null), 5000); return; }
       if (isTransactionCSV(parsed.headers)) {
         autoImportTransactions(parsed);
-      } else if (isPolymarketCSV(parsed.headers)) {
-        autoImportPolymarket(parsed);
       } else {
         setCsvText(text); setCsvPreview(parsed);
       }
@@ -1175,180 +950,55 @@ export default function BettingTracker() {
     e.target.value = "";
   };
 
-  // Convert ISO timestamp to EST date string (YYYY-MM-DD)
-  const isoToEstDate = (iso) => {
-    if (!iso) return "";
-    try {
-      const dt = new Date(iso);
-      // Format in America/New_York timezone
-      const parts = dt.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); // en-CA gives YYYY-MM-DD
-      return parts;
-    } catch { return iso.slice(0, 10); }
-  };
-
-  // Get initial date from placed timestamp (EST). For individual bets without clustering context.
-  const getGameDate = (placedIso, settledIso) => {
-    const baseDate = isoToEstDate(placedIso);
-    if (!baseDate || !placedIso) return baseDate;
-    try {
-      const placed = new Date(placedIso);
-      const estHour = parseInt(placed.toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false }));
-      if (estHour >= 5) return baseDate;
-      if (settledIso) {
-        const settled = new Date(settledIso);
-        const hoursToSettle = (settled - placed) / (1000 * 60 * 60);
-        if (hoursToSettle < 4) {
-          const prevDay = new Date(placed.getTime() - 24 * 60 * 60 * 1000);
-          return prevDay.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-        }
-      }
-      return baseDate;
-    } catch { return baseDate; }
-  };
-
-  // Game-date clustering: groups bets by the actual game they belong to,
-  // then assigns all bets in each game to the earliest placed date (game date).
-  // This handles live bets placed after midnight on games that started the previous evening.
-  const clusterGameDates = (betsArr) => {
-    // Only cluster non-parlay bets that have settled timestamps
-    const clusterable = [];
-    const passthrough = [];
-    betsArr.forEach((b, i) => {
-      if (b.parlay || !b.settledAt) { passthrough.push(b); return; }
-      clusterable.push({ ...b, _idx: i });
-    });
-    if (clusterable.length === 0) return { bets: betsArr, reassigned: 0 };
-
-    // Sort by settled time
-    clusterable.sort((a, b) => (a.settledAt || "").localeCompare(b.settledAt || ""));
-
-    // Group bets that settled within 15 minutes of each other into game clusters
-    const clusters = [];
-    let current = [clusterable[0]];
-    for (let i = 1; i < clusterable.length; i++) {
-      const prev = new Date(current[current.length - 1].settledAt).getTime();
-      const curr = new Date(clusterable[i].settledAt).getTime();
-      const diffMin = Math.abs(curr - prev) / 60000;
-      if (diffMin <= 15) {
-        current.push(clusterable[i]);
-      } else {
-        clusters.push(current);
-        current = [clusterable[i]];
-      }
-    }
-    clusters.push(current);
-
-    // For each cluster, assign all bets to the earliest placed date (EST)
-    let reassigned = 0;
-    clusters.forEach(group => {
-      if (group.length < 2) return; // single bet, nothing to cluster
-      // Find earliest placed date in the group
-      const dates = group.map(b => b.date).filter(Boolean);
-      if (dates.length === 0) return;
-      const earliestDate = dates.sort()[0];
-      group.forEach(b => {
-        if (b.date !== earliestDate) { reassigned++; }
-        b.date = earliestDate;
-      });
-    });
-
-    // Merge back and return
-    const result = [...passthrough, ...clusterable.map(({ _idx, ...b }) => b)];
-    return { bets: result, reassigned };
-  };
-
   // Seamless auto-import for the user's transaction CSV format
   const autoImportTransactions = (parsed) => {
     const ts = Date.now();
-    let imported = 0, skipped = 0, dupes = 0;
+    let imported = 0, skipped = 0, filtered = 0, dupes = 0;
     // Build set of existing bids for dedup
     const existingBids = new Set(bets.filter(b => b.bid).map(b => b.bid));
-    let cashOuts = 0, pushes = 0;
     const newBets = parsed.rows.map((row, i) => {
       try {
         const status = (row.status || "").toUpperCase();
-        const isCashOut = status.includes("CASH_OUT") || status.includes("CASHOUT");
-        const isPush = status.includes("PUSH");
-        // Allow SETTLED, CASH_OUT, and PUSH; skip only VOID and non-settled
-        if (!(status.includes("SETTLED") || isCashOut) || status.includes("VOID")) { skipped++; return null; }
+        if (!status.includes("SETTLED") || status.includes("VOID") || status.includes("CASH_OUT") || status.includes("PUSH")) { skipped++; return null; }
         const rowType = (row.type || "").toLowerCase();
-        const isParlay = rowType.includes("parlay");
-        const isRoundRobin = rowType.includes("round_robin");
-        // Parse leg count from bet_info (legs separated by |)
-        const betInfoStr = row.bet_info || "";
-        const legCount = betInfoStr.split("|").filter(s => s.trim()).length || 1;
-        // Parse round robin ways from type field (e.g. "round_robin_6" → 6)
-        const rrMatch = rowType.match(/round_robin_(\d+)/);
-        const rrWays = rrMatch ? parseInt(rrMatch[1]) : (isRoundRobin ? legCount : 0);
+        if (rowType.includes("parlay") || rowType.includes("round_robin")) { filtered++; return null; }
         const bid = (row.bet_id || "").trim();
         if (bid && existingBids.has(bid)) { dupes++; return null; }
         if (bid) existingBids.add(bid); // prevent dupes within same import
+        const result = status.includes("WIN") ? "won" : "lost";
+        const decOdds = parseFloat(row.odds) || 0;
+        if (decOdds <= 1) { skipped++; return null; }
+        const americanOdds = decToAmerican(decOdds);
+        const closingDec = parseFloat(row.closing_line) || 0;
+        const closingOdds = closingDec > 1 ? decToAmerican(closingDec) : americanOdds + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 15);
         const stake = Math.abs(parseFloat(row.amount) || 0);
         const profit = parseFloat(row.profit) || 0;
-        // Grading: cash-outs → push, SETTLED_PUSH → push, $0-profit SETTLED_WIN → push
-        let result;
-        if (isCashOut) { result = "push"; cashOuts++; }
-        else if (isPush) { result = "push"; pushes++; }
-        else if (status.includes("WIN") && profit === 0) { result = "push"; pushes++; }
-        else { result = status.includes("WIN") ? "won" : "lost"; }
-        const decOdds = parseFloat(row.odds) || 0;
-        // For partial payouts (odds < 1.0) or missing odds, set American odds to 0 (N/A) and use profit directly
-        const americanOdds = decOdds > 1 ? decToAmerican(decOdds) : 0;
-        const closingDec = parseFloat(row.closing_line) || 0;
-        const hasRealClosing = closingDec > 1;
-        const closingOdds = hasRealClosing ? decToAmerican(closingDec) : (americanOdds !== 0 ? americanOdds + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 15) : 0);
-        // Convert placed time to game date (handles cross-midnight live bets)
-        const isoTime = (row.time_placed_iso || row.time_placed || "").trim();
-        const settledTime = (row.time_settled_iso || row.time_settled || "").trim();
-        const date = getGameDate(isoTime, settledTime) || isoToEstDate(isoTime) || isoTime.slice(0, 10);
+        const date = (row.time_placed_iso || row.time_placed || "").slice(0, 10);
         if (!date || date.length < 8) { skipped++; return null; }
-        const placedAt = isoTime;
+        const placedAt = (row.time_placed_iso || row.time_placed || "").trim();
         const { live } = detectLive(row);
         const { event, pick, betType } = parseBetInfo(row.bet_info);
         const { sport, league } = mapSportLeague(row.sports, row.leagues);
         const sportsbook = (row.sportsbook || "Unknown").replace(" Sportsbook", "").trim();
-        // Detect free/promo bets from tags column
-        const tags = (row.tags || "").toLowerCase();
-        const rawTags = (row.tags || "").trim();
-        const isFreeBet = /free.?bet|promo|bonus|boost|token|reward|risk.?free|on.?the.?house/i.test(tags) || stake < 0.01;
-        // Determine bet type: round robin → "Round Robin", parlay → "Parlay", live → "Live", else detected
-        const finalType = isRoundRobin ? "Round Robin" : (isParlay ? "Parlay" : (live ? "Live" : betType));
         imported++;
         return {
-          bid, id: ts + i, date, placedAt, settledAt: settledTime || undefined, sport, league, type: finalType,
+          bid, id: ts + i, date, placedAt, sport, league, type: live ? "Live" : betType,
           event, pick, odds: americanOdds, closingOdds, stake,
           result, payout: result === "won" ? stake + profit : 0,
           profit: Math.round(profit * 100) / 100,
           sportsbook, profile: importProfile,
-          ...(isCashOut && { cashOut: true }),
-          ...((isParlay || isRoundRobin) && { parlay: true }),
-          ...(legCount > 1 && { legs: legCount }),
-          ...(rrWays > 0 && { rrWays }),
-          ...(!hasRealClosing && { noClosingLine: true }),
-          ...(isFreeBet && { freeBet: true }),
-          ...(rawTags && { tags: rawTags }),
         };
       } catch { skipped++; return null; }
     }).filter(Boolean);
-    // Apply game-date clustering: group bets by same game, assign all to earliest placed date
-    let gameReassigned = 0;
-    let finalBets = newBets;
-    if (newBets.length > 1) {
-      const clustered = clusterGameDates(newBets);
-      finalBets = clustered.bets || newBets;
-      gameReassigned = clustered.reassigned || 0;
-    }
-    if (finalBets.length > 0) {
-      setBets(prev => [...prev, ...finalBets].sort((a, b) => a.date.localeCompare(b.date)));
+    if (newBets.length > 0) {
+      setBets(prev => [...prev, ...newBets].sort((a, b) => a.date.localeCompare(b.date)));
       const parts = [`Imported ${imported} bets`];
       if (dupes > 0) parts.push(`${dupes} duplicates skipped`);
-      if (pushes > 0) parts.push(`${pushes} pushes`);
-      if (cashOuts > 0) parts.push(`${cashOuts} cash-outs → push`);
-      if (gameReassigned > 0) parts.push(`${gameReassigned} bets re-dated to game day`);
+      if (filtered > 0) parts.push(`${filtered} parlays/RR skipped`);
       if (skipped > 0) parts.push(`${skipped} void/invalid skipped`);
       setImportStatus({ type: "success", message: parts.join(" · ") });
     } else {
-      setImportStatus({ type: "error", message: dupes > 0 ? `All ${dupes} bets already imported (duplicates)` : "No valid settled bets found" });
+      setImportStatus({ type: "error", message: dupes > 0 ? `All ${dupes} bets already imported (duplicates)` : "No valid settled straight bets found" });
     }
     setCsvText(""); setCsvPreview(null);
     setTimeout(() => setImportStatus(null), 6000);
@@ -1358,7 +1008,6 @@ export default function BettingTracker() {
     const raw = textOverride || csvText;
     const p = parseCSV(raw);
     if (p && isTransactionCSV(p.headers)) { autoImportTransactions(p); return; }
-    if (p && isPolymarketCSV(p.headers)) { autoImportPolymarket(p); return; }
     setCsvPreview(p);
     if (!p && raw.trim()) setImportStatus({ type: "error", message: "Could not parse CSV — make sure there is a header row and at least one data row" });
   };
@@ -1373,52 +1022,24 @@ export default function BettingTracker() {
       const newBets = csvPreview.rows.map((row, i) => {
         try {
           const dH = findH("date"); if (!dH || !row[dH]) { errors++; return null; }
-          // Convert to game date if ISO timestamp (handles cross-midnight live bets)
-          const rawDate = row[dH];
-          const settledH = csvPreview.headers.find(h => ["time_settled_iso", "time_settled", "settled"].includes(h));
-          const settledRaw = settledH ? row[settledH] : "";
-          const date = rawDate.includes("T") ? (getGameDate(rawDate, settledRaw) || isoToEstDate(rawDate) || rawDate.slice(0, 10)) : rawDate.slice(0, 10);
           const oddsH = findH("odds"); const odds = oddsH ? parseFloat(row[oddsH]) || 0 : 0;
-          const cH = findH("closingodds");
-          const hasRealClosing = cH && row[cH] && parseFloat(row[cH]);
-          const closingOdds = hasRealClosing ? parseFloat(row[cH]) : (odds !== 0 ? odds + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 20) : 0);
+          const cH = findH("closingodds"); const closingOdds = cH && row[cH] ? parseFloat(row[cH]) || odds : odds + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 20);
           const stakeH = findH("stake"); const stake = stakeH ? parseFloat(row[stakeH]) || 100 : 100;
-          // Result grading with push support
-          const rH = findH("result"); const rawResult = rH && row[rH] ? row[rH].toLowerCase() : "";
-          const pH = findH("profit"); const profit = pH && row[pH] ? parseFloat(row[pH]) || 0 : 0;
-          let result;
-          if (rawResult.includes("push") || rawResult.includes("void") || rawResult.includes("cash")) { result = "push"; }
-          else if (profit === 0 && rawResult.includes("w") && !rawResult.includes("lost")) { result = "push"; }
-          else if (rawResult.includes("w") && !rawResult.includes("lost")) { result = "won"; }
-          else { result = "lost"; }
-          const computedProfit = pH && row[pH] ? parseFloat(row[pH]) || 0 : (result === "won" ? (odds > 0 ? stake * odds / 100 : odds !== 0 ? stake * 100 / Math.abs(odds) : 0) : result === "push" ? 0 : -stake);
+          const rH = findH("result"); const result = rH && row[rH] ? (row[rH].toLowerCase().includes("w") && !row[rH].toLowerCase().includes("lost") ? "won" : "lost") : "lost";
+          const pH = findH("profit"); const profit = pH && row[pH] ? parseFloat(row[pH]) || 0 : (result === "won" ? (odds > 0 ? stake * odds / 100 : odds !== 0 ? stake * 100 / Math.abs(odds) : 0) : -stake);
           const rawSport = row[findH("sport")] || "";
           const rawLeague = row[findH("league")] || "";
           const mapped = mapSportLeague(rawSport, rawLeague);
+          // If CSV had a direct value and it's a known league, use it
           const league = ALL_LEAGUES.includes(rawSport) ? rawSport : ALL_LEAGUES.includes(rawLeague) ? rawLeague : mapped.league;
           const sport = LEAGUE_TO_SPORT[league] || mapped.sport;
-          const rawType = row[findH("type")] || "Moneyline";
-          const isRR = rawType.toLowerCase().includes("round_robin");
-          const isPar = rawType.toLowerCase().includes("parlay");
-          const type = isRR ? "Round Robin" : isPar ? "Parlay" : rawType;
           imported++;
-          return { id: ts + i, date, settledAt: settledRaw || undefined, sport, league, event: row[findH("event")] || "Imported Event", pick: row[findH("pick")] || "—", type, odds, closingOdds, stake, result, payout: result === "won" ? stake + computedProfit : 0, profit: Math.round(computedProfit * 100) / 100, sportsbook: row[findH("sportsbook")] || "Unknown", profile: importProfile, ...(!hasRealClosing && { noClosingLine: true }), ...((isPar || isRR) && { parlay: true }) };
+          return { id: ts + i, date: row[dH].slice(0, 10), sport, league, event: row[findH("event")] || "Imported Event", pick: row[findH("pick")] || "—", type: row[findH("type")] || "Moneyline", odds, closingOdds, stake, result, payout: result === "won" ? Math.abs(profit) : 0, profit: Math.round(profit * 100) / 100, sportsbook: row[findH("sportsbook")] || "Unknown", profile: importProfile };
         } catch { errors++; return null; }
       }).filter(Boolean);
-      // Apply game-date clustering
-      let finalBets = newBets;
-      let gameReassigned = 0;
-      if (newBets.length > 1) {
-        const clustered = clusterGameDates(newBets);
-        finalBets = clustered.bets || newBets;
-        gameReassigned = clustered.reassigned || 0;
-      }
-      if (finalBets.length > 0) {
-        setBets(prev => [...prev, ...finalBets].sort((a, b) => a.date.localeCompare(b.date)));
-        const parts = [`Imported ${imported} bets`];
-        if (gameReassigned > 0) parts.push(`${gameReassigned} re-dated to game day`);
-        if (errors > 0) parts.push(`${errors} rows skipped`);
-        setImportStatus({ type: "success", message: parts.join(" · ") });
+      if (newBets.length > 0) {
+        setBets(prev => [...prev, ...newBets].sort((a, b) => a.date.localeCompare(b.date)));
+        setImportStatus({ type: "success", message: `Imported ${imported} bets${errors > 0 ? ` (${errors} rows skipped)` : ""}` });
         setCsvText(""); setCsvPreview(null);
       } else {
         setImportStatus({ type: "error", message: "No valid bets found — check that your CSV has a 'date' column" });
@@ -1431,45 +1052,24 @@ export default function BettingTracker() {
   };
 
   // ─── BACKUP / RESTORE ───
-  const [exportedJson, setExportedJson] = useState(null);
-  const [showPasteRestore, setShowPasteRestore] = useState(false);
-  const [pasteJson, setPasteJson] = useState("");
-
   const exportBackup = useCallback(() => {
-    const stateMap = {
-      bets, expenses, profiles, activeProfile, bankrollEntries, bankrollHistory,
-      expensesPaidManual: [...expensesPaidManual], bankBalances, jan1Bankrolls,
-      profileNotes, bookLimits, apiEndpoints, w2gDocuments, expenseReceipts,
-      taxOtherIncome, taxFilingStatus, profitGoals, freeBetMode
-    };
-    const backup = { _meta: { version: APP_VERSION, exportedAt: new Date().toISOString(), keys: Object.keys(stateMap).length } };
-    Object.entries(stateMap).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) backup[key] = value;
-    });
-    const jsonStr = JSON.stringify(backup, null, 2);
-    const filename = `edgetracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-
-    // In Electron, use IPC or standard download
-    if (window.electronAPI) {
+    const backup = { _meta: { version: APP_VERSION, exportedAt: new Date().toISOString(), keys: PERSISTED_KEYS.length } };
+    PERSISTED_KEYS.forEach(key => {
       try {
-        const blob = new Blob([jsonStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = filename; a.style.display = "none";
-        document.body.appendChild(a); a.click();
-        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
-        setImportStatus({ type: "success", message: `Backup exported — ${Object.keys(stateMap).length} data keys saved` });
-        setTimeout(() => setImportStatus(null), 4000);
-        return;
+        const raw = localStorage.getItem(`et_${key}`);
+        if (raw !== null) backup[key] = JSON.parse(raw);
       } catch {}
-    }
-
-    // In browser/artifact: copy to clipboard and show modal
-    try { navigator.clipboard.writeText(jsonStr); } catch {}
-    setExportedJson(jsonStr);
-    setImportStatus({ type: "success", message: `Backup ready — ${Object.keys(stateMap).length} data keys. Copy the JSON below.` });
-    setTimeout(() => setImportStatus(null), 6000);
-  }, [bets, expenses, profiles, activeProfile, bankrollEntries, bankrollHistory, expensesPaidManual, bankBalances, jan1Bankrolls, profileNotes, bookLimits, apiEndpoints, w2gDocuments, expenseReceipts, taxOtherIncome, taxFilingStatus, profitGoals, freeBetMode]);
+    });
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `edgetracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setImportStatus({ type: "success", message: `Backup exported — ${PERSISTED_KEYS.length} data keys saved` });
+    setTimeout(() => setImportStatus(null), 4000);
+  }, []);
 
   const importBackup = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -1477,7 +1077,21 @@ export default function BettingTracker() {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        await restoreFromJson(ev.target.result);
+        const backup = JSON.parse(ev.target.result);
+        if (!backup._meta) throw new Error("Not a valid EdgeTracker backup file");
+        let restored = 0;
+        for (const key of PERSISTED_KEYS) {
+          if (backup[key] !== undefined) {
+            const json = JSON.stringify(backup[key]);
+            localStorage.setItem(`et_${key}`, json);
+            if (window.storage) {
+              try { await window.storage.set(`et_${key}`, json); } catch {}
+            }
+            restored++;
+          }
+        }
+        setImportStatus({ type: "success", message: `Backup restored — ${restored} keys loaded. Reloading…` });
+        setTimeout(() => window.location.reload(), 1500);
       } catch (err) {
         setImportStatus({ type: "error", message: `Restore failed: ${err.message}` });
         setTimeout(() => setImportStatus(null), 5000);
@@ -1486,36 +1100,6 @@ export default function BettingTracker() {
     reader.readAsText(file);
     e.target.value = "";
   }, []);
-
-  const restoreFromJson = async (text) => {
-    const backup = JSON.parse(text);
-    if (!backup._meta) throw new Error("Not a valid EdgeTracker backup file");
-    let restored = 0;
-    for (const key of PERSISTED_KEYS) {
-      if (backup[key] !== undefined) {
-        const json = JSON.stringify(backup[key]);
-        try { localStorage.setItem(`et_${key}`, json); } catch {}
-        if (window.storage) {
-          try { await window.storage.set(`et_${key}`, json); } catch {}
-        }
-        restored++;
-      }
-    }
-    setImportStatus({ type: "success", message: `Backup restored — ${restored} keys loaded. Reloading…` });
-    setTimeout(() => window.location.reload(), 1500);
-  };
-
-  const handlePasteRestore = async () => {
-    if (!pasteJson.trim()) return;
-    try {
-      await restoreFromJson(pasteJson);
-      setPasteJson("");
-      setShowPasteRestore(false);
-    } catch (err) {
-      setImportStatus({ type: "error", message: `Restore failed: ${err.message}` });
-      setTimeout(() => setImportStatus(null), 5000);
-    }
-  };
 
   const saveApiEndpoint = () => { if (!apiForm.name || !apiForm.url) return; setApiEndpoints(prev => [...prev, { ...apiForm, id: Date.now(), lastSync: null, status: "disconnected" }]); setApiForm({ name: "", url: "", key: "", sport: "All", active: true }); setShowAddApi(false); };
 
@@ -1781,8 +1365,10 @@ export default function BettingTracker() {
     { id: "calendar", label: "Calendar", icon: "▦" },
     { id: "strategy", label: "Strategies", icon: "◎" },
     { id: "bankroll", label: "Bankroll", icon: "◉" },
+    { id: "splits", label: "Splits", icon: "⫘" },
     { id: "tax", label: "Tax Planning", icon: "⬡" },
     { id: "accounting", label: "Accounting", icon: "§" },
+    { id: "sgp", label: "SGP Finder", icon: "⬢" },
     { id: "import", label: "Import & API", icon: "⇄" },
     { id: "bets", label: "All Bets", icon: "☰" },
   ];
@@ -1834,8 +1420,8 @@ export default function BettingTracker() {
     const yrBets = yr === "all" ? bets : bets.filter(b => b.date.startsWith(yr));
 
     // --- Summary CSV ---
-    const grossWin = yrBets.filter(b => b.result === "won").reduce((s, b) => s + b.profit, 0);
-    const grossLoss = yrBets.filter(b => b.result === "lost").reduce((s, b) => s + Math.abs(b.profit), 0);
+    const grossWin = yrBets.filter(b => b.result === "won").reduce((s, b) => s + b.payout, 0);
+    const grossLoss = yrBets.filter(b => b.result === "lost").reduce((s, b) => s + b.stake, 0);
     const netProfit = yrBets.reduce((s, b) => s + b.profit, 0);
     const totalStaked = yrBets.reduce((s, b) => s + b.stake, 0);
     const w2gTotal = w2gDocuments.filter(d => yr === "all" || d.date.startsWith(yr)).reduce((s, d) => s + d.amount, 0);
@@ -1851,10 +1437,10 @@ export default function BettingTracker() {
     csv += "Category,Amount\n";
     csv += `Total Bets Placed,${yrBets.length}\n`;
     csv += `Total Amount Wagered,"${totalStaked.toFixed(2)}"\n`;
-    csv += `Gross Winnings (profit from wins),"${grossWin.toFixed(2)}"\n`;
-    csv += `Gross Losses (loss on lost bets),"${grossLoss.toFixed(2)}"\n`;
+    csv += `Gross Winnings (payouts),"${grossWin.toFixed(2)}"\n`;
+    csv += `Gross Losses (stakes on lost bets),"${grossLoss.toFixed(2)}"\n`;
     csv += `Net Gambling Profit/Loss,"${netProfit.toFixed(2)}"\n`;
-    csv += `Win Rate,${yrBets.filter(b => b.result !== "push").length ? ((yrBets.filter(b => b.result === "won").length / yrBets.filter(b => b.result !== "push").length) * 100).toFixed(1) + "%" : "N/A"}\n\n`;
+    csv += `Win Rate,${yrBets.length ? ((yrBets.filter(b => b.result === "won").length / yrBets.length) * 100).toFixed(1) + "%" : "N/A"}\n\n`;
 
     // By Sportsbook
     csv += "═══ PROFIT BY SPORTSBOOK ═══\n";
@@ -1865,8 +1451,8 @@ export default function BettingTracker() {
       byBook[b.sportsbook].count++;
       byBook[b.sportsbook].stake += b.stake;
       byBook[b.sportsbook].profit += b.profit;
-      if (b.result === "won") byBook[b.sportsbook].wins += b.profit;
-      else if (b.result === "lost") byBook[b.sportsbook].losses += Math.abs(b.profit);
+      if (b.result === "won") byBook[b.sportsbook].wins += b.payout;
+      else byBook[b.sportsbook].losses += b.stake;
     });
     Object.entries(byBook).sort((a, b) => b[1].profit - a[1].profit).forEach(([book, d]) => {
       csv += `"${book}",${d.count},"${d.stake.toFixed(2)}","${d.wins.toFixed(2)}","${d.losses.toFixed(2)}","${d.profit.toFixed(2)}"\n`;
@@ -1883,8 +1469,8 @@ export default function BettingTracker() {
       byMonth[m].count++;
       byMonth[m].stake += b.stake;
       byMonth[m].profit += b.profit;
-      if (b.result === "won") byMonth[m].wins += b.profit;
-      else if (b.result === "lost") byMonth[m].losses += Math.abs(b.profit);
+      if (b.result === "won") byMonth[m].wins += b.payout;
+      else byMonth[m].losses += b.stake;
     });
     Object.keys(byMonth).sort().forEach(m => {
       const d = byMonth[m];
@@ -2094,8 +1680,13 @@ export default function BettingTracker() {
         </div>
       )}
 
-      {/* ─── Global Controls ─── */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Filter</span>
+          <select value={filterSport} onChange={e => { setFilterSport(e.target.value); setFilterLeague("All"); }} style={selectStyle}><option value="All">All Sports</option>{SPORTS.map(s => <option key={s} value={s}>{s}</option>)}</select>
+          <select value={filterLeague} onChange={e => setFilterLeague(e.target.value)} style={selectStyle}><option value="All">All Leagues</option>{(filterSport === "All" ? ALL_LEAGUES : (LEAGUES[filterSport] || [])).map(l => <option key={l} value={l}>{l}</option>)}</select>
+          <select value={filterType} onChange={e => setFilterType(e.target.value)} style={selectStyle}><option value="All">All Types</option>{BET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
+        </div>
         <div style={{ display: "flex", background: "rgba(255,255,255,0.03)", borderRadius: 10, border: `1px solid ${c.border}`, padding: 3 }}>
           {[
             { id: "month", label: "This Month" },
@@ -2112,15 +1703,35 @@ export default function BettingTracker() {
             }}>{p.label}</button>
           ))}
         </div>
-        <button onClick={() => setFreeBetMode(m => m === "exclude" ? "include" : "exclude")} style={{ ...btnSecondary, padding: "5px 12px", fontSize: 11, background: freeBetMode === "exclude" ? "rgba(0,230,138,0.08)" : "transparent", borderColor: freeBetMode === "exclude" ? c.green + "44" : c.border, color: freeBetMode === "exclude" ? c.green : c.textDim }} title="When on, losses from free/promo bets are excluded from P&L">🎁 Free Bet Filter {freeBetMode === "exclude" ? "ON" : "OFF"}</button>
       </div>
-
-      {/* ─── Key Stats ─── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-        <StatCard label="Net Profit" value={formatMoney(freeBetMode === "exclude" ? dashStats.adjustedProfit : dashStats.totalProfit)} color={(freeBetMode === "exclude" ? dashStats.adjustedProfit : dashStats.totalProfit) >= 0 ? c.green : c.red} sub={`${dashStats.roi >= 0 ? "+" : ""}${dashStats.roi.toFixed(1)}% ROI${dashStats.freeBetCount > 0 && freeBetMode === "exclude" ? ` · ${dashStats.freeBetCount} free` : ""}`} spark={dashStats.cumulative} />
-        <StatCard label="Win Rate" value={`${dashStats.winRate.toFixed(1)}%`} color={c.blue} sub={`${dashStats.wins}W — ${dashStats.losses}L${dashStats.pushes ? ` — ${dashStats.pushes}P` : ""}`} />
+        <StatCard label="Net Profit" value={formatMoney(dashStats.totalProfit)} color={dashStats.totalProfit >= 0 ? c.green : c.red} sub={`${dashStats.roi >= 0 ? "+" : ""}${dashStats.roi.toFixed(1)}% ROI`} spark={dashStats.cumulative} />
+        <StatCard label="Win Rate" value={`${dashStats.winRate.toFixed(1)}%`} color={c.blue} sub={`${dashStats.wins}W — ${dashStats.losses}L`} />
         <StatCard label="Avg CLV" value={`${dashStats.avgCLV >= 0 ? "+" : ""}${dashStats.avgCLV.toFixed(2)}%`} color={dashStats.avgCLV >= 0 ? c.green : c.red} sub="Closing Line Value" />
         <StatCard label="Volume" value={`$${dashStats.totalStake.toLocaleString()}`} color={c.purple} sub={`${dashStats.total} bets · $${dashStats.avgStake.toFixed(0)} avg`} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Profit by League</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {Object.entries(dashStats.byLeague).sort((a, b) => b[1].profit - a[1].profit).map(([league, data]) => {
+              const mx = Math.max(...Object.values(dashStats.byLeague).map(d => Math.abs(d.profit)));
+              return (<div key={league} style={{ display: "flex", flexDirection: "column", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 13, color: c.text, fontWeight: 600 }}>{league}</span><span style={{ fontSize: 10, color: c.textDim }}>{data.sport}</span></div><div style={{ display: "flex", gap: 12, alignItems: "center" }}><span style={{ fontSize: 11, color: c.textDim }}>{data.count} bets · {((data.wins / data.count) * 100).toFixed(0)}%</span><span style={{ fontSize: 14, fontWeight: 600, color: data.profit >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>{formatMoney(data.profit)}</span></div></div><MiniBar value={data.profit} max={mx} color={data.profit >= 0 ? c.green : c.red} /></div>);
+            })}
+          </div>
+        </div>
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Profit by Sport</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {Object.entries(dashStats.bySport).sort((a, b) => b[1].profit - a[1].profit).map(([sport, data]) => {
+              const mx = Math.max(...Object.values(dashStats.bySport).map(d => Math.abs(d.profit)));
+              // Count leagues under this sport
+              const leaguesInSport = Object.entries(dashStats.byLeague).filter(([, v]) => v.sport === sport);
+              const leagueList = leaguesInSport.map(([l]) => l).join(", ");
+              return (<div key={sport} style={{ display: "flex", flexDirection: "column", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 13, color: c.text, fontWeight: 600 }}>{sport}</span>{leaguesInSport.length > 0 && <span style={{ fontSize: 10, color: c.textDim }}>{leagueList}</span>}</div><div style={{ display: "flex", gap: 12, alignItems: "center" }}><span style={{ fontSize: 11, color: c.textDim }}>{data.count} bets · {((data.wins / data.count) * 100).toFixed(0)}%</span><span style={{ fontSize: 14, fontWeight: 600, color: data.profit >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>{formatMoney(data.profit)}</span></div></div><MiniBar value={data.profit} max={mx} color={data.profit >= 0 ? c.green : c.red} /></div>);
+            })}
+          </div>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
         {[{ l: "Best Day", v: formatMoney(dashStats.bestDay[1]), s: dashStats.bestDay[0], c2: c.green }, { l: "Worst Day", v: formatMoney(dashStats.worstDay[1]), s: dashStats.worstDay[0], c2: c.red }, { l: "Current Streak", v: `${dashStats.streak}${dashStats.streakType === "won" ? "W" : "L"}`, s: dashStats.streakType === "won" ? "winning" : "losing", c2: dashStats.streakType === "won" ? c.green : c.red }, { l: "Monthly Burn", v: formatMoney(expenseStats.monthlyBurn), s: `${expenseStats.activeCount} active expenses`, c2: c.amber }].map(it => (
@@ -2130,171 +1741,6 @@ export default function BettingTracker() {
             {it.s && <div style={{ fontSize: 11, color: c.textDim, marginTop: 2 }}>{it.s}</div>}
           </div>
         ))}
-      </div>
-
-      {/* ─── Profit Goal Tracker ─── */}
-      <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: goalProjection ? 16 : 0 }}>
-          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Profit Goal {goalProjection ? goalProjection.targetMonth < 12 ? `(by ${MONTHS[goalProjection.targetMonth - 1]})` : "(Annual)" : ""}</h3>
-          <button onClick={() => { setGoalForm({ year: String(new Date().getFullYear()), goal: goalProjection?.targetAmount || "", targetMonth: goalProjection?.targetMonth || "12" }); setShowGoalEditor(true); }} style={{ ...btnSecondary, padding: "4px 12px", fontSize: 11 }}>{goalProjection ? "Edit Goal" : "+ Set Goal"}</button>
-        </div>
-
-        {showGoalEditor && (
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 16, padding: 14, background: "rgba(255,255,255,0.02)", borderRadius: 12, border: `1px solid ${c.border}` }}>
-            <div style={{ flex: 1 }}>
-              <label style={fieldLabel}>Year</label>
-              <select value={goalForm.year} onChange={e => setGoalForm(f => ({ ...f, year: e.target.value }))} style={{ ...fieldInput, width: "100%" }}>
-                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: 2 }}>
-              <label style={fieldLabel}>Profit Target ($)</label>
-              <input type="number" value={goalForm.goal} onChange={e => setGoalForm(f => ({ ...f, goal: e.target.value }))} placeholder="e.g. 100000" style={{ ...fieldInput, width: "100%" }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={fieldLabel}>By Month</label>
-              <select value={goalForm.targetMonth} onChange={e => setGoalForm(f => ({ ...f, targetMonth: e.target.value }))} style={{ ...fieldInput, width: "100%" }}>
-                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-              </select>
-            </div>
-            <button onClick={() => { if (goalForm.goal) { setProfitGoals(prev => ({ ...prev, [goalForm.year]: { goal: parseFloat(goalForm.goal), targetMonth: parseInt(goalForm.targetMonth) } })); setShowGoalEditor(false); } }} style={{ ...btnSecondary, padding: "8px 16px", background: c.greenDim, borderColor: c.green + "44", color: c.green, fontWeight: 600, whiteSpace: "nowrap" }}>Save</button>
-            <button onClick={() => setShowGoalEditor(false)} style={{ ...btnSecondary, padding: "8px 12px", whiteSpace: "nowrap" }}>Cancel</button>
-          </div>
-        )}
-
-        {goalProjection ? (() => {
-          const gp = goalProjection;
-          const mc = gp.mc;
-          const profit = gp.currentProfit;
-          const barPct = Math.max(0, Math.min(100, gp.pctComplete));
-          const pacePct = Math.min(100, gp.pctTimeElapsed);
-          const aheadOfPace = profit >= gp.goalPace;
-          const paceColor = aheadOfPace ? c.green : c.amber;
-          const profitDisplay = freeBetMode === "exclude" ? profit : gp.currentProfit;
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Progress bar */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: paceColor }}>{formatMoney(profitDisplay)}</span>
-                  <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: c.textDim }}>/ {formatMoney(gp.targetAmount)}</span>
-                </div>
-                <div style={{ position: "relative", height: 18, background: "rgba(255,255,255,0.04)", borderRadius: 10, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${barPct}%`, background: `linear-gradient(90deg, ${paceColor}88, ${paceColor})`, borderRadius: 10, transition: "width 0.5s ease" }} />
-                  {/* Pace marker */}
-                  <div style={{ position: "absolute", top: 0, left: `${pacePct}%`, width: 2, height: "100%", background: c.text, opacity: 0.4 }} title={`Expected pace: ${formatMoney(gp.goalPace)}`} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                  <span style={{ fontSize: 10, color: c.textDim }}>{barPct.toFixed(1)}% of goal</span>
-                  <span style={{ fontSize: 10, color: c.textDim }}>Day {gp.elapsedDays} of {gp.totalDays} · {gp.remainingDays} remaining</span>
-                </div>
-              </div>
-              {/* Stats row */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-                <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: c.textDim, textTransform: "uppercase", letterSpacing: 0.8 }}>Daily Pace</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: gp.dailyRate >= 0 ? c.green : c.red, marginTop: 2 }}>{formatMoney(gp.dailyRate)}/d</div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: c.textDim, textTransform: "uppercase", letterSpacing: 0.8 }}>Need</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: gp.neededDailyRate > gp.dailyRate * 1.5 ? c.red : gp.neededDailyRate > gp.dailyRate ? c.amber : c.green, marginTop: 2 }}>{gp.remainingDays > 0 ? `${formatMoney(gp.neededDailyRate)}/d` : "—"}</div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: c.textDim, textTransform: "uppercase", letterSpacing: 0.8 }}>Projected</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: gp.projectedTotal >= gp.targetAmount ? c.green : c.amber, marginTop: 2 }}>{formatMoney(gp.projectedTotal)}</div>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: c.textDim, textTransform: "uppercase", letterSpacing: 0.8 }}>Status</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: paceColor, marginTop: 2 }}>{aheadOfPace ? `+${formatMoney(profit - gp.goalPace)}` : formatMoney(profit - gp.goalPace)}</div>
-                </div>
-              </div>
-
-              {/* MC simulation results */}
-              {mc && (
-                <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 12, padding: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: c.text }}>Variance Projection ({mc.sims.toLocaleString()} simulations)</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: mc.hitGoalPct >= 70 ? c.green : mc.hitGoalPct >= 40 ? c.amber : c.red }}>{mc.hitGoalPct.toFixed(0)}% chance to hit goal</span>
-                  </div>
-                  {/* Visual range bar */}
-                  {(() => {
-                    const allVals = [mc.p5, mc.p25, mc.p50, mc.p75, mc.p95, gp.targetAmount, 0];
-                    const minV = Math.min(...allVals);
-                    const maxV = Math.max(...allVals);
-                    const range = maxV - minV || 1;
-                    const toX = (v) => ((v - minV) / range) * 100;
-                    return (
-                      <div style={{ position: "relative", height: 40, margin: "8px 0 12px" }}>
-                        {/* 5-95 band */}
-                        <div style={{ position: "absolute", top: 10, left: `${toX(mc.p5)}%`, width: `${toX(mc.p95) - toX(mc.p5)}%`, height: 20, background: "rgba(99,102,241,0.1)", borderRadius: 4 }} />
-                        {/* 25-75 band */}
-                        <div style={{ position: "absolute", top: 10, left: `${toX(mc.p25)}%`, width: `${toX(mc.p75) - toX(mc.p25)}%`, height: 20, background: "rgba(99,102,241,0.2)", borderRadius: 4 }} />
-                        {/* Median line */}
-                        <div style={{ position: "absolute", top: 8, left: `${toX(mc.p50)}%`, width: 2, height: 24, background: c.purple, borderRadius: 1 }} />
-                        {/* Goal line */}
-                        <div style={{ position: "absolute", top: 4, left: `${toX(gp.targetAmount)}%`, width: 2, height: 32, background: c.amber, borderRadius: 1 }} />
-                        <div style={{ position: "absolute", top: -2, left: `${toX(gp.targetAmount)}%`, transform: "translateX(-50%)", fontSize: 9, color: c.amber, fontWeight: 600, whiteSpace: "nowrap" }}>Goal</div>
-                        {/* Labels */}
-                        <div style={{ position: "absolute", top: 34, left: `${toX(mc.p5)}%`, transform: "translateX(-50%)", fontSize: 9, color: c.textDim }}>{formatMoney(mc.p5)}</div>
-                        <div style={{ position: "absolute", top: 34, left: `${toX(mc.p50)}%`, transform: "translateX(-50%)", fontSize: 9, color: c.purple, fontWeight: 600 }}>{formatMoney(mc.p50)}</div>
-                        <div style={{ position: "absolute", top: 34, left: `${toX(mc.p95)}%`, transform: "translateX(-50%)", fontSize: 9, color: c.textDim }}>{formatMoney(mc.p95)}</div>
-                      </div>
-                    );
-                  })()}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginTop: 8 }}>
-                    {[{ l: "Worst (5th)", v: mc.p5, cl: c.red }, { l: "Low (25th)", v: mc.p25, cl: c.amber }, { l: "Median", v: mc.p50, cl: c.purple }, { l: "High (75th)", v: mc.p75, cl: c.green }, { l: "Best (95th)", v: mc.p95, cl: c.green }].map(it => (
-                      <div key={it.l} style={{ textAlign: "center" }}>
-                        <div style={{ fontSize: 9, color: c.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>{it.l}</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: it.cl, marginTop: 2 }}>{formatMoney(it.v)}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 11, color: c.textDim, lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
-                    {mc.hitGoalPct >= 70 ? `At your current win rate (${(mc.wr * 100).toFixed(1)}%) and volume (~${Math.round(mc.remainingBets / gp.remainingDays)} bets/day), you're on strong track. ` : mc.hitGoalPct >= 40 ? `You have a realistic shot but need consistency. ` : `You'll need to increase volume or edge to hit this target. `}
-                    {gp.projectedTotal >= gp.targetAmount ? `Linear projection puts you at ${formatMoney(gp.projectedTotal)}, exceeding your goal by ${formatMoney(gp.projectedTotal - gp.targetAmount)}.` : `You need ${formatMoney(gp.neededDailyRate)}/day (vs current ${formatMoney(gp.dailyRate)}/day) to close the gap.`}
-                    {mc.p50 > gp.targetAmount && ` Median simulation outcome: ${formatMoney(mc.p50)} — variance-adjusted projection beats your goal.`}
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })() : (
-          <div style={{ textAlign: "center", padding: "20px 0", color: c.textDim }}>
-            <p style={{ fontSize: 13, margin: "0 0 8px" }}>Set a profit target to track your pace and see variance projections</p>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Sport/League Breakdown ─── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: c.text, margin: 0, fontFamily: "'Space Grotesk', sans-serif" }}>Breakdown</h3>
-          <select value={filterSport} onChange={e => { setFilterSport(e.target.value); setFilterLeague("All"); }} style={selectStyle}><option value="All">All Sports</option>{SPORTS.map(s => <option key={s} value={s}>{s}</option>)}</select>
-          <select value={filterLeague} onChange={e => setFilterLeague(e.target.value)} style={selectStyle}><option value="All">All Leagues</option>{(filterSport === "All" ? ALL_LEAGUES : (LEAGUES[filterSport] || [])).map(l => <option key={l} value={l}>{l}</option>)}</select>
-          <select value={filterType} onChange={e => setFilterType(e.target.value)} style={selectStyle}><option value="All">All Types</option>{BET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
-            <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Profit by League</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {Object.entries(dashStats.byLeague).sort((a, b) => b[1].profit - a[1].profit).map(([league, data]) => {
-                const mx = Math.max(...Object.values(dashStats.byLeague).map(d => Math.abs(d.profit)));
-                return (<div key={league} style={{ display: "flex", flexDirection: "column", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 13, color: c.text, fontWeight: 600 }}>{league}</span><span style={{ fontSize: 10, color: c.textDim }}>{data.sport}</span></div><div style={{ display: "flex", gap: 12, alignItems: "center" }}><span style={{ fontSize: 11, color: c.textDim }}>{data.count} bets · {(((data.count - (data.pushes || 0)) ? (data.wins / (data.count - (data.pushes || 0))) * 100 : 0)).toFixed(0)}%</span><span style={{ fontSize: 14, fontWeight: 600, color: data.profit >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>{formatMoney(data.profit)}</span></div></div><MiniBar value={data.profit} max={mx} color={data.profit >= 0 ? c.green : c.red} /></div>);
-              })}
-            </div>
-          </div>
-          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
-            <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Profit by Sport</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {Object.entries(dashStats.bySport).sort((a, b) => b[1].profit - a[1].profit).map(([sport, data]) => {
-                const mx = Math.max(...Object.values(dashStats.bySport).map(d => Math.abs(d.profit)));
-                const leaguesInSport = Object.entries(dashStats.byLeague).filter(([, v]) => v.sport === sport);
-                const leagueList = leaguesInSport.map(([l]) => l).join(", ");
-                return (<div key={sport} style={{ display: "flex", flexDirection: "column", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 13, color: c.text, fontWeight: 600 }}>{sport}</span>{leaguesInSport.length > 0 && <span style={{ fontSize: 10, color: c.textDim }}>{leagueList}</span>}</div><div style={{ display: "flex", gap: 12, alignItems: "center" }}><span style={{ fontSize: 11, color: c.textDim }}>{data.count} bets · {(((data.count - (data.pushes || 0)) ? (data.wins / (data.count - (data.pushes || 0))) * 100 : 0)).toFixed(0)}%</span><span style={{ fontSize: 14, fontWeight: 600, color: data.profit >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>{formatMoney(data.profit)}</span></div></div><MiniBar value={data.profit} max={mx} color={data.profit >= 0 ? c.green : c.red} /></div>);
-              })}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ─── Year Switcher ─── */}
@@ -2629,7 +2075,7 @@ export default function BettingTracker() {
         // Apply scatter filters
         const points = allScatterPoints.filter(p => {
           if (!scatterShowWins && p.result === "won") return false;
-          if (!scatterShowLosses && p.result === "lost") return false;
+          if (!scatterShowLosses && p.result !== "won") return false;
           if (scatterSport !== "All" && p.league !== scatterSport && p.sport !== scatterSport) return false;
           if (scatterType === "Live" && p.type !== "Live") return false;
           if (scatterType === "Pre-game" && p.type === "Live") return false;
@@ -2731,7 +2177,7 @@ export default function BettingTracker() {
               {/* Scatter dots — draws wins last so they're on top */}
               {[...points].sort((a, b) => (a.result === "won" ? 1 : 0) - (b.result === "won" ? 1 : 0)).map((p, i) => {
                 const r = Math.max(2.5, Math.min(6, (p.stake / 200) * 4));
-                return <circle key={i} cx={toX(p.hour)} cy={toY(p.profit)} r={r} fill={p.result === "won" ? c.green : p.result === "push" ? c.amber : c.red} opacity={0.55} />;
+                return <circle key={i} cx={toX(p.hour)} cy={toY(p.profit)} r={r} fill={p.result === "won" ? c.green : c.red} opacity={0.55} />;
               })}
               {/* Axis labels */}
               <text x={padL + chartW / 2} y={H - 0} fill={c.textDim} fontSize={9} textAnchor="middle" fontFamily="JetBrains Mono">Time of Day (EST)</text>
@@ -2811,13 +2257,12 @@ export default function BettingTracker() {
 
   /* ═══ CALENDAR ═══ */
   const renderCalendar = () => {
-    const mb = profileBets.filter(b => { const d = new Date(b.date); return d.getMonth() === calMonth && d.getFullYear() === calYear; });
+    const mb = bets.filter(b => { const d = new Date(b.date); return d.getMonth() === calMonth && d.getFullYear() === calYear; });
     const isDay = selectedDay && selectedDay.bets.length > 0;
     const sb = isDay ? selectedDay.bets : mb;
     const sp = sb.reduce((s, b) => s + b.profit, 0);
     const sw = sb.filter(b => b.result === "won").length;
-    const sl = sb.filter(b => b.result === "lost").length;
-    const sp2 = sb.filter(b => b.result === "push").length;
+    const sl = sb.length - sw;
     const sStake = sb.reduce((s, b) => s + b.stake, 0);
     const sRoi = sStake > 0 ? (sp / sStake) * 100 : 0;
     const label = isDay ? selectedDay.date : `${MONTHS[calMonth]} ${calYear}`;
@@ -2834,7 +2279,7 @@ export default function BettingTracker() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
           <div><div style={{ fontSize: 11, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>P&L</div><div style={{ fontSize: 24, fontWeight: 700, color: sp >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{sp >= 0 ? "+" : ""}{formatMoney(sp)}</div></div>
-          <div><div style={{ fontSize: 11, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Record</div><div style={{ fontSize: 24, fontWeight: 700, color: c.text, fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{sw}-{sl}{sp2 > 0 ? `-${sp2}` : ""}</div></div>
+          <div><div style={{ fontSize: 11, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Record</div><div style={{ fontSize: 24, fontWeight: 700, color: c.text, fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{sw}-{sl}</div></div>
           <div><div style={{ fontSize: 11, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>ROI</div><div style={{ fontSize: 24, fontWeight: 700, color: sRoi >= 0 ? c.green : c.red, fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>{sRoi >= 0 ? "+" : ""}{sRoi.toFixed(1)}%</div></div>
           <div><div style={{ fontSize: 11, color: c.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Volume</div><div style={{ fontSize: 24, fontWeight: 700, color: c.purple, fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>${sStake.toLocaleString()}</div></div>
         </div>
@@ -2876,7 +2321,7 @@ export default function BettingTracker() {
                 <td style={{ padding: "10px", fontFamily: "'JetBrains Mono', monospace" }}>{formatOdds(b.odds)}</td>
                 <td style={{ padding: "10px", fontFamily: "'JetBrains Mono', monospace" }}>${b.stake}</td>
                 <td style={{ padding: "10px", fontSize: 11, color: c.textDim }}>{b.sportsbook}</td>
-                <td style={{ padding: "10px" }}><span style={{ padding: "2px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: b.result === "won" ? c.greenDim : b.result === "push" ? c.amberDim : c.redDim, color: b.result === "won" ? c.green : b.result === "push" ? c.amber : c.red }}>{b.result.toUpperCase()}</span>{b.freeBet && <span style={{ marginLeft: 4, padding: "2px 6px", borderRadius: 4, fontSize: 9, fontWeight: 600, background: "rgba(168,85,247,0.12)", color: "#a855f7" }}>FREE</span>}</td>
+                <td style={{ padding: "10px" }}><span style={{ padding: "2px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: b.result === "won" ? c.greenDim : c.redDim, color: b.result === "won" ? c.green : c.red }}>{b.result.toUpperCase()}</span></td>
                 <td style={{ padding: "10px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: b.profit >= 0 ? c.green : c.red }}>{b.profit >= 0 ? "+" : ""}{formatMoney(b.profit)}</td>
               </tr>
             ))}</tbody>
@@ -2889,23 +2334,93 @@ export default function BettingTracker() {
   /* ═══ CLV ═══ */
   /* ═══ STRATEGY ANALYSIS ═══ */
   const strategyPlays = useMemo(() => {
-    // Group bets by game: date + normalized team matchup
-    const gameGroups = {};
+    // ── NBA team normalization for cross-book matching ──
+    const NBA_TEAMS = {
+      'hawks':'ATL','atlanta':'ATL','celtics':'BOS','boston':'BOS','nets':'BKN','brooklyn':'BKN',
+      'hornets':'CHA','charlotte':'CHA','bulls':'CHI','chicago':'CHI','cavaliers':'CLE','cleveland':'CLE','cavs':'CLE',
+      'mavericks':'DAL','dallas':'DAL','mavs':'DAL','nuggets':'DEN','denver':'DEN','pistons':'DET','detroit':'DET',
+      'warriors':'GSW','golden state':'GSW','rockets':'HOU','houston':'HOU','pacers':'IND','indiana':'IND',
+      'clippers':'LAC','la clippers':'LAC','l.a. clippers':'LAC','los angeles clippers':'LAC',
+      'lakers':'LAL','la lakers':'LAL','l.a. lakers':'LAL','los angeles lakers':'LAL',
+      'grizzlies':'MEM','memphis':'MEM','heat':'MIA','miami heat':'MIA','bucks':'MIL','milwaukee':'MIL',
+      'timberwolves':'MIN','minnesota':'MIN','pelicans':'NOP','new orleans':'NOP',
+      'knicks':'NYK','new york knicks':'NYK','thunder':'OKC','oklahoma city':'OKC',
+      'magic':'ORL','orlando':'ORL','76ers':'PHI','philadelphia':'PHI','suns':'PHX','phoenix':'PHX',
+      'trail blazers':'POR','portland':'POR','kings':'SAC','sacramento':'SAC',
+      'spurs':'SAS','san antonio':'SAS','raptors':'TOR','toronto':'TOR',
+      'jazz':'UTA','utah jazz':'UTA','wizards':'WAS','washington wizards':'WAS',
+    };
+    const DK_ABBR = {'ATL':'ATL','BOS':'BOS','BKN':'BKN','CHA':'CHA','CHI':'CHI','CLE':'CLE','DAL':'DAL','DEN':'DEN','DET':'DET','GS':'GSW','HOU':'HOU','IND':'IND','LA':'LAC','MEM':'MEM','MIA':'MIA','MIL':'MIL','MIN':'MIN','NO':'NOP','NY':'NYK','OKC':'OKC','ORL':'ORL','PHI':'PHI','PHO':'PHX','POR':'POR','SAC':'SAC','SA':'SAS','TOR':'TOR','UTA':'UTA','WAS':'WAS'};
+
+    const findNBATeams = (text) => {
+      const tl = text.toLowerCase();
+      const found = new Set();
+      for (const [abbr, code] of Object.entries(DK_ABBR)) {
+        if (new RegExp('\\b' + abbr + '\\b', 'i').test(text)) found.add(code);
+      }
+      for (const [name, code] of Object.entries(NBA_TEAMS)) {
+        if (tl.includes(name)) found.add(code);
+      }
+      return [...found];
+    };
+
+    const normalizeCollege = (name) => {
+      const clean = name.replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').toLowerCase().trim();
+      const words = clean.split(' ').filter(w => w.length > 2);
+      return words.length >= 2 ? words.slice(0, 2).join(' ') : clean;
+    };
+
+    const normalizeEvent = (info) => {
+      // Try NBA teams first
+      const nbaTeams = findNBATeams(info);
+      if (nbaTeams.length >= 2) {
+        return nbaTeams.sort().slice(0, 2).join('|');
+      }
+      // College: extract from "Team A @ Team B" pattern
+      let clean = info.replace(/^.*?(?:Total\s*(?:Points?\s*(?:Scored)?)?|Total\s*Score|Live\s*Total|Alternate\s*Total\s*Points?|Point\s*Spread|Spread\s*Betting|Moneyline|Money\s*Line)\s*/i, '').trim();
+      if (!clean) clean = info;
+      clean = clean.replace(/(?:Including\s*Overtime|Live\s*Betting|Live|Alternate\s*-\s*NCAAB)\s*/gi, '').trim();
+      const parts = clean.split(/\s+(?:@|vs\.?|at)\s+/i);
+      if (parts.length >= 2) {
+        const t1 = normalizeCollege(parts[0]);
+        const t2 = normalizeCollege(parts[1].split('|')[0]);
+        if (t1 && t2) return [t1, t2].sort().join('|');
+      }
+      // Fallback
+      const m = info.match(/([A-Z][A-Za-z\s.'\-]+?)\s+(?:@|vs\.?|at|v)\s+([A-Z][A-Za-z\s.'\-]+)/);
+      if (m) { const ts = [m[1].trim().slice(0,22), m[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
+      return info.slice(-40);
+    };
+
     const getBetDir = (info) => {
       if (/\bOver\b/i.test(info)) return "over";
       if (/\bUnder\b/i.test(info)) return "under";
       return null;
     };
     const getBetNum = (info) => {
-      // "Over 20.5", "Under 5.5", "O 20.5", "U 5.5", "| Over 20.5"
-      const m = info.match(/(?:Over|Under|O|U)\s+([\d.]+)/i);
+      const m = info.match(/(?:Over|Under)\s+([\d.]+)/i);
       return m ? parseFloat(m[1]) : null;
     };
     const getSpreadNum = (info) => {
-      // "+3.5 Spread", "Spread -7", also standalone "+3.5" or "-7.5" near spread context
-      const m = info.match(/([+-]?\d+\.?\d*)\s*(?:Spread|Handicap|Point|POINT)/i) 
-             || info.match(/(?:Spread|Handicap)\s*([+-]?\d+\.?\d*)/i);
+      const m = info.match(/([+-]?\d+\.?\d*)\s*(?:Spread|Handicap|Point|POINT)/i);
       return m ? parseFloat(m[1]) : null;
+    };
+    // Extract the team name from a spread pick like "Memphis Grizzlies +8.5 Point Spread"
+    const getSpreadTeam = (info) => {
+      // Strip leading market descriptors
+      let clean = info.replace(/^.*?(?:Point\s*Spread|Spread\s*Betting|Live\s*Spread)\s*/i, '').trim();
+      if (!clean) clean = info;
+      // Extract team before the spread number
+      const m = clean.match(/^(.+?)\s+[+-]?\d+\.?\d*\s*(?:Spread|Handicap|Point|POINT)/i);
+      if (m) {
+        const raw = m[1].trim();
+        // Try NBA normalization
+        const nbaTeams = findNBATeams(raw);
+        if (nbaTeams.length >= 1) return nbaTeams[0];
+        // College fallback
+        return normalizeCollege(raw);
+      }
+      return null;
     };
     const getMLPick = (info) => {
       if (/Moneyline|Winner|Money Line/i.test(info)) {
@@ -2913,32 +2428,52 @@ export default function BettingTracker() {
       }
       return null;
     };
-    const normalizeEvent = (ev) => {
-      if (!ev) return ev;
-      // Try 3-letter abbreviated team codes first: "TOR vs. POR", "SAC vs MIN", "LAL @ BOS"
-      const abbr = ev.match(/\b([A-Z]{2,4})\s+(?:@|vs\.?|at|v)\s+([A-Z]{2,4})\b/);
-      if (abbr) { const ts = [abbr[1], abbr[2]].sort(); return `${ts[0]}|${ts[1]}`; }
-      // Try embedded abbreviated codes anywhere in string (handles "Player Name TOR vs. POR | Over X")
-      const embedded = ev.match(/([A-Z]{2,5})\s+(?:@|vs\.?|at|v)\s+([A-Z]{2,5})/);
-      if (embedded) { const ts = [embedded[1], embedded[2]].sort(); return `${ts[0]}|${ts[1]}`; }
-      // Full team names: "Toronto Raptors @ Portland Trail Blazers"
-      const full = ev.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:@|vs\.?|at|v)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
-      if (full) { const ts = [full[1].trim().slice(0,22), full[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
-      // MMA: "Fighter Name vs. Fighter Name"
-      const mma = ev.match(/([A-Z][a-z]+\s+[A-Z][A-Za-z'\-]+)\s+(?:vs\.?|v)\s+([A-Z][a-z]+\s+[A-Z][A-Za-z'\-]+)/);
-      if (mma) { const ts = [mma[1].trim().slice(0,22), mma[2].trim().slice(0,22)].sort(); return `${ts[0]}|${ts[1]}`; }
-      // Fallback: strip numbers, special chars, normalize whitespace
-      return ev.replace(/[^A-Za-z\s]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+
+    // Check if bet is a player prop (not game-level total)
+    const isPlayerProp = (info) => {
+      const iu = info.toUpperCase();
+      return ['REBOUNDS','ASSISTS','BLOCKS','STEALS','THREE','3-POINT','TURNOVERS','RECEPTIONS','PASSING','RUSHING','FANTASY','HIGHER','LOWER','COMBO','DOUBLE','TRIPLE','TO SCORE','TO RECORD','TEAM TOTAL'].some(kw => iu.includes(kw));
     };
+    // Check if bet is a partial game total (quarter/half)
+    const isPartialTotal = (info) => {
+      const iu = info.toUpperCase();
+      return ['1ST QUARTER','1ST HALF','2ND QUARTER','2ND HALF','3RD QUARTER','4TH QUARTER','QUARTER TOTAL','HALF TOTAL'].some(kw => iu.includes(kw));
+    };
+
+    // Group bets by game: date + normalized event
+    const gameGroups = {};
     filtered.forEach((b, idx) => {
-      // Try event first, then pick, then combined for team matchup
-      let norm = normalizeEvent(b.event);
-      if (!norm || !norm.includes("|")) norm = normalizeEvent(b.pick);
-      if (!norm || !norm.includes("|")) norm = normalizeEvent(`${b.event} ${b.pick}`);
-      const key = `${b.date}|${norm}`;
+      const key = `${b.date}|${normalizeEvent(b.pick || b.event)}`;
       if (!gameGroups[key]) gameGroups[key] = [];
       gameGroups[key].push({ ...b, _idx: idx });
     });
+
+    // Also do fuzzy matching: same date, different keys that might be same game
+    const dateKeys = {};
+    Object.keys(gameGroups).forEach(k => {
+      const [date, ...rest] = k.split('|');
+      if (!dateKeys[date]) dateKeys[date] = [];
+      dateKeys[date].push(k);
+    });
+    for (const [date, keys] of Object.entries(dateKeys)) {
+      for (let i = 0; i < keys.length; i++) {
+        for (let j = i + 1; j < keys.length; j++) {
+          const k1 = keys[i].replace(date + '|', '');
+          const k2 = keys[j].replace(date + '|', '');
+          // Simple similarity: check if keys share >50% of their characters
+          const s1 = new Set(k1.split(''));
+          const s2 = new Set(k2.split(''));
+          const intersection = [...s1].filter(c => s2.has(c)).length;
+          const similarity = intersection / Math.max(s1.size, s2.size);
+          if (similarity > 0.55 && k1.length > 5 && k2.length > 5) {
+            // Merge groups
+            const merged = [...(gameGroups[keys[i]] || []), ...(gameGroups[keys[j]] || [])];
+            gameGroups[keys[i]] = merged;
+            delete gameGroups[keys[j]];
+          }
+        }
+      }
+    }
 
     const plays = { middle: [], ladder: [], liveArb: [], standard: [] };
     const taggedIds = new Set();
@@ -2946,12 +2481,19 @@ export default function BettingTracker() {
     Object.entries(gameGroups).forEach(([key, gBets]) => {
       if (gBets.length < 2) return;
 
-      // Extract line info for each bet
+      // Enrich with line info — EXCLUDE player props and partial totals from O/U detection
       const enriched = gBets.map(b => {
-        const combined = `${b.pick || ""} ${b.event || ""}`;
+        const info = b.pick || b.event;
+        const isProp = isPlayerProp(info);
+        const isPartial = isPartialTotal(info);
         return {
-          ...b, dir: getBetDir(combined), num: getBetNum(combined),
-          spreadNum: getSpreadNum(combined), mlPick: getMLPick(combined),
+          ...b,
+          dir: (!isProp && !isPartial) ? getBetDir(info) : null,
+          num: (!isProp && !isPartial) ? getBetNum(info) : null,
+          spreadNum: getSpreadNum(info),
+          spreadTeam: getSpreadTeam(info),
+          mlPick: getMLPick(info),
+          isProp, isPartial,
         };
       });
 
@@ -2959,79 +2501,136 @@ export default function BettingTracker() {
       const unders = enriched.filter(e => e.dir === "under" && e.num != null);
       const spreads = enriched.filter(e => e.spreadNum != null);
 
-      // ── MIDDLE DETECTION: Over X + Under Y, Y > X, gap > 0 and <= 20
-      for (const o of overs) {
-        for (const u of unders) {
-          const gap = u.num - o.num;
-          if (gap > 0 && gap <= 20) {
-            const ids = [o.id, u.id];
-            const both = [o, u];
-            const totalPL = both.reduce((s, b) => s + b.profit, 0);
-            const bothWon = both.every(b => b.result === "won");
-            const oneWon = both.filter(b => b.result === "won").length === 1;
-            plays.middle.push({ bets: both, ids, gap, over: o.num, under: u.num, totalPL, bothWon, oneWon, date: o.date, event: o.event, books: [...new Set(both.map(b => b.sportsbook))] });
-            ids.forEach(id => taggedIds.add(id));
+      // ── CLOSED POSITION DETECTION: Over + Under on same game (any gap) ──
+      // This is the strict filter from our Python analysis
+      if (overs.length > 0 && unders.length > 0) {
+        const allClosed = [...overs, ...unders];
+        const minGap = Math.min(...overs.map(o => Math.min(...unders.map(u => u.num - o.num))));
+
+        // Classify: real middle (gap > 0 and reasonable) vs closing position
+        const isMiddle = minGap > 0 && minGap <= 20;
+        if (isMiddle) {
+          // Find the best middle pair(s)
+          for (const o of overs) {
+            for (const u of unders) {
+              const gap = u.num - o.num;
+              if (gap > 0 && gap <= 20) {
+                const ids = [o.id, u.id];
+                const both = [o, u];
+                const pairPL = both.reduce((s, b) => s + b.profit, 0);
+                const bothWon = both.every(b => b.result === "won");
+                const oneWon = both.filter(b => b.result === "won").length === 1;
+                plays.middle.push({ bets: both, ids, gap, over: o.num, under: u.num, totalPL: pairPL, bothWon, oneWon, date: o.date, event: o.event, books: [...new Set(both.map(b => b.sportsbook))] });
+                ids.forEach(id => taggedIds.add(id));
+              }
+            }
+          }
+          // Tag ALL remaining O/U on this game as part of closing structure
+          allClosed.forEach(b => taggedIds.add(b.id));
+        } else {
+          // It's a closing position (over+under, negative or zero gap)
+          // Tag as closing positions (filtered from standard bets)
+          allClosed.forEach(b => taggedIds.add(b.id));
+        }
+      }
+
+      // ── SPREAD MIDDLE DETECTION: any two spreads on different sides of same game ──
+      // Team A +8.5 & Team B +3.5 = 12pt window (both dogs, different teams)
+      // Team A -3.5 & Team B +7.5 = 4pt window (fav + dog)
+      // Both favs = no middle possible (gap always ≤ 0)
+      if (spreads.length >= 2) {
+        const usedSpreadIds = new Set();
+        for (let i = 0; i < spreads.length; i++) {
+          for (let j = i + 1; j < spreads.length; j++) {
+            const s1 = spreads[i];
+            const s2 = spreads[j];
+            if (usedSpreadIds.has(s1.id) || usedSpreadIds.has(s2.id)) continue;
+            if (taggedIds.has(s1.id) || taggedIds.has(s2.id)) continue;
+
+            // Determine if on different teams
+            const team1 = s1.spreadTeam;
+            const team2 = s2.spreadTeam;
+            let onDifferentTeams = false;
+            if (team1 && team2 && team1 !== team2) {
+              onDifferentTeams = true;
+            } else if (!team1 || !team2) {
+              // Can't extract teams — infer from signs: different signs = definitely different teams
+              if ((s1.spreadNum > 0) !== (s2.spreadNum > 0)) onDifferentTeams = true;
+              // Same sign: could be same team (ladder) or different teams (middle)
+              // Conservative: only treat as middle if both positive (both dogs = must be different teams)
+              else if (s1.spreadNum > 0 && s2.spreadNum > 0) onDifferentTeams = true;
+            }
+
+            if (onDifferentTeams) {
+              // Gap = sum of spread values when on opposite teams
+              const gap = s1.spreadNum + s2.spreadNum;
+              if (gap > 0 && gap <= 25) {
+                const both = [s1, s2];
+                const pairPL = both.reduce((s, b) => s + b.profit, 0);
+                plays.middle.push({
+                  bets: both, ids: [s1.id, s2.id], gap: parseFloat(gap.toFixed(1)),
+                  over: s1.spreadNum, under: s2.spreadNum,
+                  totalPL: pairPL,
+                  bothWon: both.every(b => b.result === "won"),
+                  oneWon: both.filter(b => b.result === "won").length === 1,
+                  date: s1.date, event: s1.event,
+                  books: [...new Set(both.map(b => b.sportsbook))],
+                  spreadMiddle: true,
+                });
+                usedSpreadIds.add(s1.id);
+                usedSpreadIds.add(s2.id);
+                taggedIds.add(s1.id);
+                taggedIds.add(s2.id);
+              } else if (gap <= 0) {
+                // Closing position on spread — just tag and exclude
+                taggedIds.add(s1.id);
+                taggedIds.add(s2.id);
+              }
+            }
           }
         }
       }
 
-      // ── LADDER DETECTION: 3+ same-direction at different lines
-      const overVals = [...new Set(overs.map(o => o.num))].sort((a,b) => a-b);
-      const underVals = [...new Set(unders.map(u => u.num))].sort((a,b) => b-a);
+      // ── LADDER DETECTION: 3+ same-direction at different lines ──
+      const untaggedOvers = overs.filter(o => !taggedIds.has(o.id));
+      const untaggedUnders = unders.filter(u => !taggedIds.has(u.id));
+      const overVals = [...new Set(untaggedOvers.map(o => o.num))].sort((a,b) => a-b);
+      const underVals = [...new Set(untaggedUnders.map(u => u.num))].sort((a,b) => b-a);
       if (overVals.length >= 3) {
-        const lBets = overs.filter(o => overVals.includes(o.num)).sort((a,b) => a.num - b.num);
+        const lBets = untaggedOvers.filter(o => overVals.includes(o.num)).sort((a,b) => a.num - b.num);
         const totalPL = lBets.reduce((s, b) => s + b.profit, 0);
         const hit = lBets.filter(b => b.result === "won").length;
         plays.ladder.push({ bets: lBets, dir: "Over", lines: overVals, rungs: lBets.length, hit, totalPL, date: lBets[0].date, event: lBets[0].event });
         lBets.forEach(b => taggedIds.add(b.id));
       }
       if (underVals.length >= 3) {
-        const lBets = unders.filter(u => underVals.includes(u.num)).sort((a,b) => b.num - a.num);
+        const lBets = untaggedUnders.filter(u => underVals.includes(u.num)).sort((a,b) => b.num - a.num);
         const totalPL = lBets.reduce((s, b) => s + b.profit, 0);
         const hit = lBets.filter(b => b.result === "won").length;
         plays.ladder.push({ bets: lBets, dir: "Under", lines: underVals, rungs: lBets.length, hit, totalPL, date: lBets[0].date, event: lBets[0].event });
         lBets.forEach(b => taggedIds.add(b.id));
       }
-      // Spread ladders: 3+ different spread numbers
-      const spreadVals = [...new Set(spreads.map(s => s.spreadNum))].sort((a,b) => a-b);
+      const spreadVals = [...new Set(spreads.filter(s => !taggedIds.has(s.id)).map(s => s.spreadNum))].sort((a,b) => a-b);
       if (spreadVals.length >= 3) {
-        const lBets = spreads.sort((a,b) => a.spreadNum - b.spreadNum);
+        const lBets = spreads.filter(s => !taggedIds.has(s.id)).sort((a,b) => a.spreadNum - b.spreadNum);
         const totalPL = lBets.reduce((s, b) => s + b.profit, 0);
         const hit = lBets.filter(b => b.result === "won").length;
         plays.ladder.push({ bets: lBets, dir: "Spread", lines: spreadVals, rungs: lBets.length, hit, totalPL, date: lBets[0].date, event: lBets[0].event });
         lBets.forEach(b => taggedIds.add(b.id));
       }
 
-      // ── LIVE ARBITRAGE: Over X + Under X at SAME number (opposite sides, same line)
+      // ── LIVE ARBITRAGE: Over + Under on live at same or near-same number ──
       for (const o of overs) {
         for (const u of unders) {
-          if (o.num === u.num && (o.type === "Live" || u.type === "Live")) {
-            const both = [o, u];
-            const totalPL = both.reduce((s, b) => s + b.profit, 0);
-            const bothWon = both.every(b => b.result === "won");
-            const totalStaked = both.reduce((s, b) => s + b.stake, 0);
-            // Calculate if arb was profitable regardless of outcome (juice diff)
-            const oImplied = Math.abs(o.odds) >= 100 ? (o.odds > 0 ? 100 / (o.odds + 100) : Math.abs(o.odds) / (Math.abs(o.odds) + 100)) : 0.5;
-            const uImplied = Math.abs(u.odds) >= 100 ? (u.odds > 0 ? 100 / (u.odds + 100) : Math.abs(u.odds) / (Math.abs(u.odds) + 100)) : 0.5;
-            const combinedVig = oImplied + uImplied;
-            const isTrueArb = combinedVig < 1;
-            plays.liveArb.push({ bets: both, totalPL, line: o.num, bothWon, isTrueArb, combinedVig, totalStaked, date: o.date, event: o.event, books: [...new Set(both.map(b => b.sportsbook))], oOdds: o.odds, uOdds: u.odds });
-            both.forEach(b => taggedIds.add(b.id));
-          }
-        }
-      }
-      // Also check near-same lines (within 0.5 pts) for live arb attempts
-      for (const o of overs) {
-        for (const u of unders) {
+          if (taggedIds.has(o.id) && taggedIds.has(u.id)) continue;
           const diff = Math.abs(o.num - u.num);
-          if (diff > 0 && diff <= 0.5 && (o.type === "Live" || u.type === "Live")) {
+          if (diff <= 1 && (o.type === "Live" || u.type === "Live")) {
             const both = [o, u];
-            if (both.some(b => taggedIds.has(b.id))) continue; // skip if already tagged as exact arb
             const totalPL = both.reduce((s, b) => s + b.profit, 0);
             const oImplied = Math.abs(o.odds) >= 100 ? (o.odds > 0 ? 100 / (o.odds + 100) : Math.abs(o.odds) / (Math.abs(o.odds) + 100)) : 0.5;
             const uImplied = Math.abs(u.odds) >= 100 ? (u.odds > 0 ? 100 / (u.odds + 100) : Math.abs(u.odds) / (Math.abs(u.odds) + 100)) : 0.5;
             const combinedVig = oImplied + uImplied;
-            plays.liveArb.push({ bets: both, totalPL, line: `${o.num}/${u.num}`, bothWon: false, isTrueArb: combinedVig < 1, combinedVig, totalStaked: both.reduce((s, b) => s + b.stake, 0), date: o.date, event: o.event, books: [...new Set(both.map(b => b.sportsbook))], oOdds: o.odds, uOdds: u.odds });
+            plays.liveArb.push({ bets: both, totalPL, line: diff === 0 ? o.num : `${o.num}/${u.num}`, bothWon: both.every(b => b.result === "won"), isTrueArb: combinedVig < 1, combinedVig, totalStaked: both.reduce((s, b) => s + b.stake, 0), date: o.date, event: o.event, books: [...new Set(both.map(b => b.sportsbook))], oOdds: o.odds, uOdds: u.odds });
             both.forEach(b => taggedIds.add(b.id));
           }
         }
@@ -3042,7 +2641,6 @@ export default function BettingTracker() {
     const standardBets = filtered.filter(b => !taggedIds.has(b.id));
     const stdPL = standardBets.reduce((s, b) => s + b.profit, 0);
     const stdWins = standardBets.filter(b => b.result === "won").length;
-    const stdGraded = standardBets.filter(b => b.result !== "push").length;
 
     // Summary stats for each strategy
     const summarize = (items) => {
@@ -3057,7 +2655,7 @@ export default function BettingTracker() {
       middle: { items: plays.middle, ...summarize(plays.middle) },
       ladder: { items: plays.ladder, ...summarize(plays.ladder) },
       liveArb: { items: plays.liveArb, ...summarize(plays.liveArb) },
-      standard: { plays: 0, betCount: standardBets.length, totalPL: stdPL, totalStake: standardBets.reduce((s, b) => s + b.stake, 0), roi: standardBets.length ? (stdPL / standardBets.reduce((s, b) => s + b.stake, 0)) * 100 : 0, winRate: stdGraded ? (stdWins / stdGraded) * 100 : 0 },
+      standard: { plays: 0, betCount: standardBets.length, totalPL: stdPL, totalStake: standardBets.reduce((s, b) => s + b.stake, 0), roi: standardBets.length ? (stdPL / standardBets.reduce((s, b) => s + b.stake, 0)) * 100 : 0, winRate: standardBets.length ? (stdWins / standardBets.length) * 100 : 0 },
       taggedCount: taggedIds.size,
     };
   }, [filtered]);
@@ -3067,7 +2665,7 @@ export default function BettingTracker() {
   const renderStrategy = () => {
     const sp = strategyPlays;
     const strategies = [
-      { id: "middle", label: "Middles", icon: "⇿", desc: "Over X + Under Y on same game — win both if score lands in the gap", color: c.green, accent: "rgba(16,185,129,0.12)", ...sp.middle },
+      { id: "middle", label: "Middles", icon: "⇿", desc: "Over X + Under Y with a gap, OR two spreads on opposite teams (e.g. Team A +8.5, Team B +3.5 = 12pt middle). Win both if score lands in the window.", color: c.green, accent: "rgba(16,185,129,0.12)", ...sp.middle },
       { id: "ladder", label: "Ladders", icon: "☷", desc: "3+ bets at progressively different lines on the same game, same direction", color: c.blue, accent: "rgba(99,102,241,0.12)", ...sp.ladder },
       { id: "liveArb", label: "Live Arbitrage", icon: "⚡", desc: "Over X + Under X at same number during live play — exploit juice differences across shifting lines", color: c.purple, accent: "rgba(168,85,247,0.12)", ...sp.liveArb },
     ];
@@ -3080,7 +2678,7 @@ export default function BettingTracker() {
         <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
           <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 8px", fontFamily: "'JetBrains Mono', monospace" }}>Strategy Detection</h3>
           <p style={{ fontSize: 13, color: c.textDim, lineHeight: 1.7, margin: 0 }}>
-            Bets are grouped by game (date + matchup) then scanned for patterns. Middles look for opposing over/under with a gap. Ladders detect 3+ same-direction bets at different lines. Live scalps find opposing live bets on the same game. A single bet can appear in multiple strategies (e.g. part of a middle AND a ladder).
+            Bets are grouped by game (date + matchup) using NBA team normalization and college fuzzy matching across sportsbooks. Player props and quarter/half totals are excluded from game-total detection. Middles detect opposing totals with a positive gap AND spread middles on opposite teams (e.g. Team A +8.5, Team B +3.5 = 12pt middle). Opposing positions with no gap are silently filtered out. Ladders detect 3+ same-direction bets. Live arbs find opposing live bets.
           </p>
         </div>
 
@@ -3118,7 +2716,7 @@ export default function BettingTracker() {
         {stratFocus !== "overview" && (() => {
           const st = strategies.find(s => s.id === stratFocus);
           if (!st || st.plays === 0) return <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24, textAlign: "center", color: c.textDim }}>No {st?.label || ""} plays detected in current data.</div>;
-          const sortedItems = [...st.items].sort((a, b) => b.date.localeCompare(a.date));
+          const sortedItems = [...st.items].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
           return (
             <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
@@ -3153,7 +2751,7 @@ export default function BettingTracker() {
                         <tr key={i} style={{ borderBottom: `1px solid ${c.border}08` }}>
                           <td style={{ padding: "10px 6px", color: c.textDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{play.date}</td>
                           <td style={{ padding: "10px 6px", color: c.text, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{play.event?.slice(0, 45)}</td>
-                          {stratFocus === "middle" && <td style={{ textAlign: "center", padding: "10px 6px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: c.cyan }}>O {play.over} / U {play.under}</td>}
+                          {stratFocus === "middle" && <td style={{ textAlign: "center", padding: "10px 6px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: c.cyan }}>{play.spreadMiddle ? `${play.over > 0 ? "+" : ""}${play.over} / ${play.under > 0 ? "+" : ""}${play.under}` : `O ${play.over} / U ${play.under}`}</td>}
                           {stratFocus === "middle" && <td style={{ textAlign: "center", padding: "10px 6px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: c.green }}>{play.gap}</td>}
                           {stratFocus === "ladder" && <td style={{ textAlign: "center", padding: "10px 6px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: st.color }}>{play.rungs}</td>}
                           {stratFocus === "ladder" && <td style={{ textAlign: "center", padding: "10px 6px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: c.textDim }}>{play.dir} {play.lines?.map(l => l.toString()).join(", ")}</td>}
@@ -3281,24 +2879,8 @@ export default function BettingTracker() {
     const profKey = activeProfile === "all" ? null : activeProfile;
     const pBooks = profKey ? bankrollEntries.filter(e => (e.profile || profiles[0]?.id) === profKey) : bankrollEntries;
     const pHistory = profKey ? bankrollHistory.filter(t => (t.profile || profiles[0]?.id) === profKey) : bankrollHistory;
-
-    // When "All Profiles", aggregate books with the same name
-    const displayBooks = profKey ? [...pBooks].sort((a, b) => b.balance - a.balance) : (() => {
-      const agg = {};
-      pBooks.forEach(e => {
-        const key = e.book;
-        if (!agg[key]) agg[key] = { id: `agg_${key}`, book: key, balance: 0, lastUpdated: e.lastUpdated, profiles: [], entries: [] };
-        agg[key].balance += e.balance;
-        agg[key].entries.push(e);
-        const pName = profiles.find(p => p.id === (e.profile || profiles[0]?.id))?.name || e.profile;
-        agg[key].profiles.push({ name: pName, balance: e.balance });
-        if (e.lastUpdated > agg[key].lastUpdated) agg[key].lastUpdated = e.lastUpdated;
-      });
-      return Object.values(agg).sort((a, b) => b.balance - a.balance);
-    })();
-    const isAggregated = !profKey;
-
-    const maxBal = Math.max(1, ...displayBooks.map(e => e.balance));
+    const sortedBooks = [...pBooks].sort((a, b) => b.balance - a.balance);
+    const maxBal = Math.max(1, ...sortedBooks.map(e => e.balance));
     const booksTotal = pBooks.reduce((s, e) => s + e.balance, 0);
     const curBankBal = profKey ? (bankBalances[profKey] || 0) : Object.values(bankBalances).reduce((s, v) => s + v, 0);
     const totalBR = booksTotal + curBankBal;
@@ -3333,7 +2915,7 @@ export default function BettingTracker() {
 
         {/* KPI row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-          <StatCard label="Total Bankroll" value={`$${totalBR.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.green} sub={`${displayBooks.length} books + bank`} />
+          <StatCard label="Total Bankroll" value={`$${totalBR.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.green} sub={`${pBooks.length} books + bank`} />
           <StatCard label="Bankroll Growth $" value={`${growthDollar >= 0 ? "+" : ""}$${growthDollar.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} color={growthDollar >= 0 ? c.green : c.red} sub={`vs $${jan1.toLocaleString()} on Jan 1`} />
           <StatCard label="Bankroll Growth %" value={`${growthPct >= 0 ? "+" : ""}${growthPct.toFixed(1)}%`} color={growthPct >= 0 ? c.green : c.red} sub="Return on starting bankroll" />
           <StatCard label="Bank Balance" value={`$${curBankBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} color={c.cyan} sub="Liquidity not in books" />
@@ -3346,13 +2928,13 @@ export default function BettingTracker() {
             <button onClick={() => setShowAddBook(true)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>+ Add Book</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-            {displayBooks.map(entry => (
+            {sortedBooks.map(entry => (
               <div key={entry.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 12, padding: 16, position: "relative" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: c.text }}>{entry.book}</span>
-                  {!isAggregated && <button onClick={() => setEditingBook(entry.id === editingBook ? null : entry.id)} style={{ background: "transparent", border: "none", color: c.textDim, fontSize: 14, cursor: "pointer", padding: 0 }}>✎</button>}
+                  <button onClick={() => setEditingBook(entry.id === editingBook ? null : entry.id)} style={{ background: "transparent", border: "none", color: c.textDim, fontSize: 14, cursor: "pointer", padding: 0 }}>✎</button>
                 </div>
-                {!isAggregated && editingBook === entry.id ? (
+                {editingBook === entry.id ? (
                   <div style={{ display: "flex", gap: 6 }}>
                     <input type="number" defaultValue={entry.balance} style={{ ...fieldInput, width: "100%", fontSize: 14 }} onKeyDown={e => { if (e.key === "Enter") { setBankrollEntries(prev => prev.map(b => b.id === entry.id ? { ...b, balance: parseFloat(e.target.value) || 0, lastUpdated: new Date().toISOString().slice(0, 10) } : b)); setEditingBook(null); }}} />
                     <button onClick={() => { setBankrollEntries(prev => prev.filter(b => b.id !== entry.id)); setEditingBook(null); }} style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, color: c.red, borderColor: c.red + "44" }}>✕</button>
@@ -3360,16 +2942,6 @@ export default function BettingTracker() {
                 ) : (
                   <>
                     <div style={{ fontSize: 22, fontWeight: 700, color: c.green, fontFamily: "'JetBrains Mono', monospace" }}>${entry.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                    {isAggregated && entry.profiles && entry.profiles.length > 1 && (
-                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
-                        {entry.profiles.map((p, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: c.textDim }}>
-                            <span>{p.name}</span>
-                            <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>${p.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                     <div style={{ height: 4, background: "rgba(255,255,255,0.04)", borderRadius: 2, marginTop: 10, overflow: "hidden" }}>
                       <div style={{ width: `${(entry.balance / maxBal) * 100}%`, height: "100%", background: `linear-gradient(90deg, ${c.green}, ${c.blue})`, borderRadius: 2, transition: "width 0.5s" }} />
                     </div>
@@ -3519,53 +3091,92 @@ export default function BettingTracker() {
           <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Profile Notes</h3>
-                <span style={{ fontSize: 11, color: c.textDim }}>({profName} — logins, passwords, phone numbers, etc.)</span>
+                <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Encrypted Vault</h3>
+                <span style={{ fontSize: 11, color: c.textDim }}>({profName} — logins, passwords, 2FA, notes • AES-256 encrypted)</span>
               </div>
-              <button onClick={() => setShowAddNote(true)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>+ Add Note</button>
             </div>
-            {showAddNote && (
-              <div style={{ background: c.bg, border: `1px solid ${c.borderLight}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <div><label style={fieldLabel}>Label</label><input value={noteForm.label} onChange={e => setNoteForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. DraftKings Password" style={{ ...fieldInput, width: 200 }} /></div>
-                  <div><label style={fieldLabel}>Value</label><input value={noteForm.value} onChange={e => setNoteForm(f => ({ ...f, value: e.target.value }))} placeholder="e.g. myP@ssw0rd" style={{ ...fieldInput, width: 240 }} /></div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 4 }}>
-                    <input type="checkbox" checked={noteForm.sensitive} onChange={e => setNoteForm(f => ({ ...f, sensitive: e.target.checked }))} id="sensCheck" style={{ accentColor: c.amber }} />
-                    <label htmlFor="sensCheck" style={{ fontSize: 11, color: c.textDim, cursor: "pointer" }}>Sensitive (hidden by default)</label>
+
+            {/* Vault PIN setup */}
+            {!vaultPinHash ? (
+              <div style={{ textAlign: "center", padding: 20 }}>
+                <p style={{ fontSize: 13, color: c.textDim, margin: "0 0 16px" }}>Set a master PIN to encrypt credentials for this profile.</p>
+                {!showVaultPinSetup ? (
+                  <button onClick={() => setShowVaultPinSetup(true)} style={{ ...btnPrimary, padding: "10px 24px" }}>Set Up Vault PIN</button>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+                    <input type="password" value={vaultPinInput} onChange={e => setVaultPinInput(e.target.value.replace(/\D/g, ''))} placeholder="PIN (4+ digits)" style={{ ...fieldInput, width: 180, textAlign: "center", fontSize: 18, letterSpacing: 8 }} maxLength={8} />
+                    <input type="password" value={vaultPinConfirm} onChange={e => setVaultPinConfirm(e.target.value.replace(/\D/g, ''))} placeholder="Confirm PIN" style={{ ...fieldInput, width: 180, textAlign: "center", fontSize: 18, letterSpacing: 8 }} maxLength={8} onKeyDown={e => { if (e.key === "Enter") handleVaultSetup(); }} />
+                    {vaultError && <div style={{ color: c.red, fontSize: 12 }}>{vaultError}</div>}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={handleVaultSetup} style={{ ...btnPrimary, padding: "8px 20px", fontSize: 12 }}>Create</button>
+                      <button onClick={() => { setShowVaultPinSetup(false); setVaultPinInput(""); setVaultPinConfirm(""); setVaultError(""); }} style={{ ...btnSecondary, padding: "8px 20px", fontSize: 12 }}>Cancel</button>
+                    </div>
                   </div>
-                  <button onClick={() => { if (!noteForm.label) return; const notes = profileNotes[profKey] || []; setProfileNotes(prev => ({ ...prev, [profKey]: [...notes, { id: Date.now(), ...noteForm }] })); setNoteForm({ label: "", value: "", sensitive: false }); setShowAddNote(false); }} style={{ ...btnPrimary, padding: "10px 20px" }}>Save</button>
-                  <button onClick={() => setShowAddNote(false)} style={{ ...btnSecondary, padding: "10px 16px" }}>Cancel</button>
-                </div>
+                )}
               </div>
-            )}
-            {(profileNotes[profKey] || []).length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {(profileNotes[profKey] || []).map(note => (
-                  <div key={note.id} style={{ display: "flex", alignItems: "center", gap: 12, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 10, padding: "12px 16px" }}>
-                    <div style={{ flex: "0 0 180px" }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: c.text }}>{note.label}</span>
-                    </div>
-                    <div style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>
-                      {note.sensitive && !revealedNotes.has(note.id) ? (
-                        <span style={{ color: c.textDim, letterSpacing: 2 }}>••••••••••</span>
-                      ) : (
-                        <span style={{ color: c.text }}>{note.value}</span>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {note.sensitive && (
-                        <button onClick={() => setRevealedNotes(prev => { const next = new Set(prev); if (next.has(note.id)) next.delete(note.id); else next.add(note.id); return next; })} style={{ background: "transparent", border: `1px solid ${c.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 10, color: c.textDim, cursor: "pointer" }}>
-                          {revealedNotes.has(note.id) ? "Hide" : "Show"}
-                        </button>
-                      )}
-                      <button onClick={() => { navigator.clipboard?.writeText(note.value); }} style={{ background: "transparent", border: `1px solid ${c.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 10, color: c.blue, cursor: "pointer" }}>Copy</button>
-                      <button onClick={() => setProfileNotes(prev => ({ ...prev, [profKey]: (prev[profKey] || []).filter(n => n.id !== note.id) }))} style={{ background: "transparent", border: "none", color: c.textDim, cursor: "pointer", fontSize: 12, padding: "3px 6px" }}>✕</button>
-                    </div>
-                  </div>
-                ))}
+            ) : !vaultUnlocked ? (
+              /* Locked state */
+              <div style={{ textAlign: "center", padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 18 }}>🔒</span>
+                  <input type="password" value={vaultPin} onChange={e => setVaultPin(e.target.value.replace(/\D/g, ''))} placeholder="Enter PIN" style={{ ...fieldInput, width: 140, textAlign: "center", fontSize: 18, letterSpacing: 8 }} maxLength={8} onKeyDown={e => { if (e.key === "Enter") handleVaultUnlock(); }} />
+                  <button onClick={handleVaultUnlock} style={{ ...btnPrimary, padding: "8px 18px", fontSize: 12 }}>Unlock</button>
+                </div>
+                {vaultError && <div style={{ color: c.red, fontSize: 12 }}>{vaultError}</div>}
               </div>
             ) : (
-              <div style={{ padding: 20, textAlign: "center", color: c.textDim, fontSize: 13 }}>No notes yet for {profName}. Add logins, passwords, phone numbers, or any important info.</div>
+              /* Unlocked vault */
+              <div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
+                  <button onClick={() => setShowVaultAdd(true)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>+ Add Credential</button>
+                  <button onClick={() => { setVaultUnlocked(false); setVaultPin(""); setVaultItems([]); setRevealedVault(new Set()); }} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>🔒 Lock</button>
+                </div>
+
+                {showVaultAdd && (
+                  <div style={{ background: c.bg, border: `1px solid ${c.green}44`, borderRadius: 12, padding: 16, marginBottom: 14 }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div><label style={fieldLabel}>Label *</label><input value={vaultForm.label} onChange={e => setVaultForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. DraftKings" style={{ ...fieldInput, width: 160 }} /></div>
+                      <div><label style={fieldLabel}>Username</label><input value={vaultForm.username} onChange={e => setVaultForm(f => ({ ...f, username: e.target.value }))} placeholder="user@email.com" style={{ ...fieldInput, width: 180 }} /></div>
+                      <div><label style={fieldLabel}>Password</label><input type="password" value={vaultForm.password} onChange={e => setVaultForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••••" style={{ ...fieldInput, width: 160 }} /></div>
+                      <div><label style={fieldLabel}>Phone/2FA</label><input value={vaultForm.phone} onChange={e => setVaultForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 123-4567" style={{ ...fieldInput, width: 140 }} /></div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
+                      <div style={{ flex: 1 }}><label style={fieldLabel}>Notes</label><input value={vaultForm.notes} onChange={e => setVaultForm(f => ({ ...f, notes: e.target.value }))} placeholder="Verification questions, promo codes, etc." style={{ ...fieldInput, width: "100%" }} /></div>
+                      <button onClick={handleVaultAdd} style={{ ...btnPrimary, padding: "8px 18px", fontSize: 12 }}>Save</button>
+                      <button onClick={() => { setShowVaultAdd(false); setVaultForm({ label: "", username: "", password: "", phone: "", notes: "" }); }} style={{ ...btnSecondary, padding: "8px 18px", fontSize: 12 }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {(() => {
+                  const profVaultItems = vaultItems.filter(v => v.profile === profKey);
+                  return profVaultItems.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: "center", color: c.textDim, fontSize: 13 }}>No credentials stored for {profName}. Click "+ Add Credential" to store logins.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {profVaultItems.map(item => {
+                        const revealed = revealedVault.has(item.id);
+                        return (
+                          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 10, padding: "12px 16px" }}>
+                            <div style={{ flex: "0 0 140px" }}><span style={{ fontSize: 13, fontWeight: 700, color: c.green }}>{item.label}</span></div>
+                            <div style={{ flex: 1, display: "flex", gap: 16, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+                              {item.username && <span style={{ color: revealed ? c.text : c.textDim }}>{revealed ? item.username : "••••••"}</span>}
+                              {item.password && <span style={{ color: revealed ? c.amber : c.textDim }}>{revealed ? item.password : "••••••"}</span>}
+                              {item.phone && <span style={{ color: revealed ? c.cyan : c.textDim }}>{revealed ? item.phone : "••••"}</span>}
+                              {item.notes && <span style={{ color: revealed ? c.textDim : c.textDim, fontSize: 11 }}>{revealed ? item.notes : "notes hidden"}</span>}
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setRevealedVault(prev => { const n = new Set(prev); if (n.has(item.id)) n.delete(item.id); else n.add(item.id); return n; })} style={{ background: "transparent", border: `1px solid ${c.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 10, color: c.textDim, cursor: "pointer" }}>{revealed ? "Hide" : "Show"}</button>
+                              {revealed && item.password && <button onClick={() => navigator.clipboard?.writeText(item.password)} style={{ background: "transparent", border: `1px solid ${c.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 10, color: c.blue, cursor: "pointer" }}>Copy PW</button>}
+                              <button onClick={() => handleVaultDelete(item.id)} style={{ background: "transparent", border: "none", color: c.textDim, cursor: "pointer", fontSize: 12, padding: "3px 6px" }}>✕</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
             )}
           </div>
         )}
@@ -3600,9 +3211,9 @@ export default function BettingTracker() {
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-        <StatCard label="Gross Winnings" value={formatMoney(taxStats.grossWinnings)} color={c.green} sub="Profit from winning bets" />
+        <StatCard label="Gross Winnings" value={formatMoney(taxStats.grossWinnings)} color={c.green} sub="Total payouts from wins" />
         <StatCard label="Total Losses" value={formatMoney(taxStats.totalLosses)} color={c.red} sub="Deductible if itemizing" />
-        <StatCard label="Net Gambling Income" value={formatMoney(taxStats.netGambling)} color={taxStats.netGambling >= 0 ? c.green : c.red} sub="Winnings minus losses" />
+        <StatCard label="Net Gambling Income" value={formatMoney(taxStats.netGambling)} color={taxStats.netGambling >= 0 ? c.green : c.red} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
@@ -3633,6 +3244,414 @@ export default function BettingTracker() {
   );
 
   /* ═══ ACCOUNTING ═══ */
+  // ═══════════════════════════════════════════════════════════════════════
+  // ─── ENCRYPTED VAULT ───
+  // ═══════════════════════════════════════════════════════════════════════
+  const handleVaultUnlock = async () => {
+    if (!vaultPinHash) { setVaultError("No PIN set. Set up your vault first."); return; }
+    const hash = await vaultCrypto.hash(vaultPin);
+    if (hash !== vaultPinHash) { setVaultError("Wrong PIN"); setVaultPin(""); return; }
+    if (vaultData) {
+      const decrypted = await vaultCrypto.decrypt(vaultPin, vaultData);
+      setVaultItems(decrypted || []);
+    } else {
+      setVaultItems([]);
+    }
+    setVaultUnlocked(true);
+    setVaultError("");
+  };
+
+  const handleVaultSetup = async () => {
+    if (vaultPinInput.length < 4) { setVaultError("PIN must be at least 4 digits"); return; }
+    if (vaultPinInput !== vaultPinConfirm) { setVaultError("PINs don't match"); return; }
+    const hash = await vaultCrypto.hash(vaultPinInput);
+    setVaultPinHash(hash);
+    const encrypted = await vaultCrypto.encrypt(vaultPinInput, []);
+    setVaultData(encrypted);
+    setVaultItems([]);
+    setVaultUnlocked(true);
+    setVaultPin(vaultPinInput);
+    setVaultPinInput("");
+    setVaultPinConfirm("");
+    setShowVaultPinSetup(false);
+    setVaultError("");
+  };
+
+  const saveVaultItems = async (items) => {
+    setVaultItems(items);
+    if (vaultPin) {
+      const encrypted = await vaultCrypto.encrypt(vaultPin, items);
+      setVaultData(encrypted);
+    }
+  };
+
+  const handleVaultAdd = async () => {
+    if (!vaultForm.label) return;
+    const item = { id: Date.now(), ...vaultForm, profile: activeProfile, created: new Date().toISOString().slice(0, 10) };
+    await saveVaultItems([...vaultItems, item]);
+    setVaultForm({ label: "", username: "", password: "", phone: "", notes: "" });
+    setShowVaultAdd(false);
+  };
+
+  const handleVaultDelete = async (id) => {
+    await saveVaultItems(vaultItems.filter(v => v.id !== id));
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ─── PROFIT SPLITS ───
+  // ═══════════════════════════════════════════════════════════════════════
+  const renderSplits = () => {
+    const profKey = activeProfile === "all" ? null : activeProfile;
+    const profName = profKey ? profiles.find(p => p.id === profKey)?.name || profKey : "All";
+    const splitConfig = profKey ? (profitSplits[profKey] || { pct: 0, override: null, payments: [] }) : null;
+
+    // Calculate owed for this profile
+    const profBets = profKey ? filtered.filter(b => (b.profile || profiles[0]?.id) === profKey) : filtered;
+    const profProfit = profBets.reduce((s, b) => s + b.profit, 0);
+    const splitPct = splitConfig?.pct || 0;
+    const autoCalc = profProfit * (splitPct / 100);
+    const owedTotal = splitConfig?.override !== null && splitConfig?.override !== undefined ? splitConfig.override : autoCalc;
+    const totalPaid = (splitConfig?.payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const balance = owedTotal - totalPaid;
+
+    if (!profKey) {
+      // Show overview for all profiles
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+            <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 8px", fontFamily: "'JetBrains Mono', monospace" }}>Profit Splits — All Profiles</h3>
+            <p style={{ fontSize: 13, color: c.textDim, lineHeight: 1.7, margin: "0 0 16px" }}>Select a specific profile to manage splits, log payments, and export 1099-NEC data.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+              {profiles.map(p => {
+                const sc = profitSplits[p.id] || { pct: 0, override: null, payments: [] };
+                const pBets = bets.filter(b => (b.profile || profiles[0]?.id) === p.id);
+                const pProfit = pBets.reduce((s, b) => s + (b.profit || 0), 0);
+                const owed = sc.override !== null && sc.override !== undefined ? sc.override : pProfit * (sc.pct / 100);
+                const paid = (sc.payments || []).reduce((s, pm) => s + (parseFloat(pm.amount) || 0), 0);
+                return (
+                  <div key={p.id} onClick={() => setActiveProfile(p.id)} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 12, padding: 18, cursor: "pointer", transition: "all 0.2s" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginBottom: 8 }}>{p.name}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 12 }}>
+                      <div><span style={{ color: c.textDim }}>Split: </span><span style={{ color: c.amber, fontWeight: 600 }}>{sc.pct}%</span></div>
+                      <div><span style={{ color: c.textDim }}>Profit: </span><span style={{ color: pProfit >= 0 ? c.green : c.red, fontWeight: 600 }}>${pProfit.toFixed(0)}</span></div>
+                      <div><span style={{ color: c.textDim }}>Owed: </span><span style={{ color: c.cyan, fontWeight: 600 }}>${owed.toFixed(0)}</span></div>
+                      <div><span style={{ color: c.textDim }}>Balance: </span><span style={{ color: (owed - paid) > 0 ? c.amber : c.green, fontWeight: 600 }}>${(owed - paid).toFixed(0)}</span></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Single-profile split management
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* Config */}
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Profit Split — {profName}</h3>
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div>
+              <label style={fieldLabel}>Split Percentage</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="number" min="0" max="100" value={splitPct} onChange={e => setProfitSplits(prev => ({ ...prev, [profKey]: { ...(prev[profKey] || { pct: 0, override: null, payments: [] }), pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) } }))} style={{ ...fieldInput, width: 80 }} />
+                <span style={{ color: c.textDim, fontSize: 14 }}>%</span>
+              </div>
+            </div>
+            <div>
+              <label style={fieldLabel}>Auto-Calculated</label>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.cyan, fontFamily: "'JetBrains Mono', monospace" }}>${autoCalc.toFixed(2)}</div>
+              <div style={{ fontSize: 10, color: c.textDim }}>{splitPct}% of ${profProfit.toFixed(0)} profit</div>
+            </div>
+            <div>
+              <label style={fieldLabel}>Manual Override</label>
+              <input type="number" value={splitConfig?.override ?? ""} onChange={e => { const v = e.target.value; setProfitSplits(prev => ({ ...prev, [profKey]: { ...(prev[profKey] || { pct: 0, override: null, payments: [] }), override: v === "" ? null : parseFloat(v) } })); }} placeholder="Leave blank for auto" style={{ ...fieldInput, width: 140 }} />
+            </div>
+          </div>
+        </div>
+
+        {/* KPI row */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+          <StatCard label="Profile Profit" value={`$${profProfit >= 0 ? "+" : ""}${profProfit.toFixed(0)}`} color={profProfit >= 0 ? c.green : c.red} sub={`${profBets.length} bets`} />
+          <StatCard label="Split Owed" value={`$${owedTotal.toFixed(0)}`} color={c.cyan} sub={splitConfig?.override !== null && splitConfig?.override !== undefined ? "Manual override" : `${splitPct}% auto`} />
+          <StatCard label="Total Paid" value={`$${totalPaid.toFixed(0)}`} color={c.green} sub={`${(splitConfig?.payments || []).length} payments`} />
+          <StatCard label="Balance Due" value={`$${balance.toFixed(0)}`} color={balance > 0 ? c.amber : c.green} sub={balance <= 0 ? "Settled" : "Outstanding"} />
+        </div>
+
+        {/* Payment log */}
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Payment Log</h3>
+            <button onClick={() => setShowAddPayment(true)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>+ Log Payment</button>
+          </div>
+
+          {showAddPayment && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16, padding: 14, background: c.bg, borderRadius: 10 }}>
+              <div><label style={fieldLabel}>Date</label><input type="date" value={paymentForm.date} onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))} style={{ ...fieldInput, width: 140 }} /></div>
+              <div><label style={fieldLabel}>Amount</label><input type="number" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00" style={{ ...fieldInput, width: 120 }} /></div>
+              <div style={{ flex: 1 }}><label style={fieldLabel}>Note</label><input value={paymentForm.note} onChange={e => setPaymentForm(f => ({ ...f, note: e.target.value }))} placeholder="e.g. Venmo, Zelle, Cash" style={{ ...fieldInput, width: "100%" }} /></div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
+                <button onClick={() => {
+                  if (!paymentForm.amount) return;
+                  const payment = { id: Date.now(), ...paymentForm, amount: parseFloat(paymentForm.amount) || 0 };
+                  setProfitSplits(prev => {
+                    const cur = prev[profKey] || { pct: 0, override: null, payments: [] };
+                    return { ...prev, [profKey]: { ...cur, payments: [...cur.payments, payment] } };
+                  });
+                  setPaymentForm({ date: new Date().toISOString().slice(0, 10), amount: "", note: "" });
+                  setShowAddPayment(false);
+                }} style={{ ...btnPrimary, padding: "8px 16px", fontSize: 12 }}>Save</button>
+                <button onClick={() => setShowAddPayment(false)} style={{ ...btnSecondary, padding: "8px 16px", fontSize: 12 }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {(splitConfig?.payments || []).length === 0 ? (
+            <div style={{ textAlign: "center", color: c.textDim, padding: 20, fontSize: 13 }}>No payments logged yet.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead><tr style={{ borderBottom: `1px solid ${c.border}` }}>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: c.textDim, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Date</th>
+                <th style={{ textAlign: "right", padding: "8px 6px", color: c.textDim, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Amount</th>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: c.textDim, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Note</th>
+                <th style={{ textAlign: "center", padding: "8px 6px", width: 40 }}></th>
+              </tr></thead>
+              <tbody>
+                {[...(splitConfig?.payments || [])].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(pm => (
+                  <tr key={pm.id} style={{ borderBottom: `1px solid ${c.border}08` }}>
+                    <td style={{ padding: "10px 6px", color: c.textDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{pm.date}</td>
+                    <td style={{ textAlign: "right", padding: "10px 6px", color: c.green, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>${(pm.amount || 0).toFixed(2)}</td>
+                    <td style={{ padding: "10px 6px", color: c.text }}>{pm.note || "—"}</td>
+                    <td style={{ textAlign: "center", padding: "10px 6px" }}>
+                      <button onClick={() => setProfitSplits(prev => {
+                        const cur = prev[profKey] || { pct: 0, override: null, payments: [] };
+                        return { ...prev, [profKey]: { ...cur, payments: cur.payments.filter(p => p.id !== pm.id) } };
+                      })} style={{ background: "transparent", border: "none", color: c.textDim, cursor: "pointer", fontSize: 12 }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* 1099-NEC Export */}
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 20 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 12px", fontFamily: "'JetBrains Mono', monospace" }}>1099-NEC Export</h3>
+          <p style={{ fontSize: 12, color: c.textDim, lineHeight: 1.6, margin: "0 0 14px" }}>Download payment data formatted for 1099-NEC filing. Payments over $600 to an individual in a tax year must be reported.</p>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button onClick={() => {
+              const payments = splitConfig?.payments || [];
+              if (!payments.length) return;
+              let csv = "Date,Amount,Note,Profile,Cumulative\n";
+              let cum = 0;
+              [...payments].sort((a, b) => (a.date || "").localeCompare(b.date || "")).forEach(p => {
+                cum += p.amount || 0;
+                csv += `"${p.date}","${(p.amount || 0).toFixed(2)}","${p.note || ""}","${profName}","${cum.toFixed(2)}"\n`;
+              });
+              csv += `\n"TOTAL","${totalPaid.toFixed(2)}","","",""\n`;
+              csv += `"1099-NEC Threshold","$600.00","","",""\n`;
+              csv += `"Requires 1099-NEC","${totalPaid >= 600 ? 'YES' : 'NO'}","","",""\n`;
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `1099-nec-${profName}-${new Date().getFullYear()}.csv`; a.click();
+              URL.revokeObjectURL(url);
+            }} style={{ ...btnSecondary, padding: "8px 18px", fontSize: 12 }}>⬇ Export 1099-NEC CSV</button>
+            <span style={{ fontSize: 12, color: totalPaid >= 600 ? c.amber : c.green, fontWeight: 600 }}>
+              {totalPaid >= 600 ? `⚠ $${totalPaid.toFixed(0)} paid — 1099-NEC required` : `$${totalPaid.toFixed(0)} paid — below $600 threshold`}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ─── SGP CORRELATION EDGE FINDER ───
+  // ═══════════════════════════════════════════════════════════════════════
+  const renderSGP = () => {
+    const SPORT_OPTIONS = [
+      { id: "nba", label: "NBA", endpoint: "nba" },
+      { id: "ncaab", label: "NCAAB", endpoint: "ncaab" },
+      { id: "nfl", label: "NFL", endpoint: "nfl" },
+      { id: "nhl", label: "NHL", endpoint: "nhl" },
+      { id: "mlb", label: "MLB", endpoint: "mlb" },
+    ];
+
+    const handleSGPSearch = async () => {
+      if (!sgpApiKey) { alert("Enter your BallDontLie API key first"); return; }
+      setSgpLoading(true);
+      setSgpResults(null);
+      try {
+        // Fetch today's games
+        const today = new Date().toISOString().slice(0, 10);
+        const gamesRes = await fetch(`https://api.balldontlie.io/${sgpSport}/v1/games?dates[]=${today}`, {
+          headers: { "Authorization": sgpApiKey }
+        });
+        if (!gamesRes.ok) throw new Error(`API error: ${gamesRes.status}`);
+        const gamesData = await gamesRes.json();
+        const games = gamesData.data || [];
+
+        // Fetch player props for each game
+        const propsRes = await fetch(`https://api.balldontlie.io/${sgpSport}/v1/props?dates[]=${today}`, {
+          headers: { "Authorization": sgpApiKey }
+        });
+        const propsData = propsRes.ok ? await propsRes.json() : { data: [] };
+
+        setSgpResults({
+          date: today,
+          sport: sgpSport,
+          games: games.slice(0, 15),
+          props: propsData.data || [],
+          fetched: new Date().toLocaleTimeString(),
+        });
+      } catch (err) {
+        setSgpResults({ error: err.message });
+      }
+      setSgpLoading(false);
+    };
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* Config */}
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 8px", fontFamily: "'JetBrains Mono', monospace" }}>SGP Correlation Edge Finder</h3>
+          <p style={{ fontSize: 13, color: c.textDim, lineHeight: 1.7, margin: "0 0 16px" }}>
+            Uses BallDontLie API (GOAT tier, $40/mo) to find player prop combos with historical correlation edges. Fetches today's slate, identifies correlated prop pairs, and surfaces the top combos to check SGP pricing on Pikkit.
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div>
+              <label style={fieldLabel}>BallDontLie API Key</label>
+              <input type="password" value={sgpApiKey} onChange={e => setSgpApiKey(e.target.value)} placeholder="Enter API key..." style={{ ...fieldInput, width: 280 }} />
+            </div>
+            <div>
+              <label style={fieldLabel}>Sport</label>
+              <select value={sgpSport} onChange={e => setSgpSport(e.target.value)} style={{ ...selectStyle, padding: "9px 12px" }}>
+                {SPORT_OPTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </div>
+            <button onClick={handleSGPSearch} disabled={sgpLoading} style={{ ...btnPrimary, padding: "10px 22px", opacity: sgpLoading ? 0.6 : 1 }}>
+              {sgpLoading ? "Fetching..." : "⬢ Fetch Today's Slate"}
+            </button>
+          </div>
+        </div>
+
+        {/* Results */}
+        {sgpResults?.error && (
+          <div style={{ background: c.card, border: `1px solid ${c.red}44`, borderRadius: 16, padding: 20, color: c.red, fontSize: 13 }}>
+            Error: {sgpResults.error}. Check your API key and ensure you have the GOAT tier for {sgpSport.toUpperCase()} access.
+          </div>
+        )}
+
+        {sgpResults && !sgpResults.error && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+              <StatCard label="Games Today" value={sgpResults.games.length} color={c.blue} sub={`${sgpResults.sport.toUpperCase()} — ${sgpResults.date}`} />
+              <StatCard label="Props Available" value={sgpResults.props.length} color={c.cyan} sub={`Fetched ${sgpResults.fetched}`} />
+              <StatCard label="Saved Combos" value={sgpSavedCombos.length} color={c.green} sub="All time" />
+            </div>
+
+            {sgpResults.games.length > 0 && (
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+                <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Today's Games</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                  {sgpResults.games.map(g => (
+                    <div key={g.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: c.text }}>{g.home_team?.full_name || g.home_team?.name || "Home"}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: c.textDim }}>vs</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: c.text, marginBottom: 6 }}>{g.visitor_team?.full_name || g.visitor_team?.name || g.away_team?.full_name || "Away"}</div>
+                      <div style={{ fontSize: 11, color: c.textDim }}>{g.status || "Scheduled"} {g.home_score !== undefined ? `${g.home_score} - ${g.away_score}` : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {sgpResults.props.length > 0 && (
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+                <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 16px", fontFamily: "'JetBrains Mono', monospace" }}>Player Props ({sgpResults.props.length})</h3>
+                <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${c.border}` }}>
+                      <th style={{ textAlign: "left", padding: "8px 6px", color: c.textDim, fontSize: 10, textTransform: "uppercase" }}>Player</th>
+                      <th style={{ textAlign: "left", padding: "8px 6px", color: c.textDim, fontSize: 10, textTransform: "uppercase" }}>Market</th>
+                      <th style={{ textAlign: "center", padding: "8px 6px", color: c.textDim, fontSize: 10, textTransform: "uppercase" }}>Line</th>
+                      <th style={{ textAlign: "center", padding: "8px 6px", color: c.textDim, fontSize: 10, textTransform: "uppercase" }}>Over</th>
+                      <th style={{ textAlign: "center", padding: "8px 6px", color: c.textDim, fontSize: 10, textTransform: "uppercase" }}>Under</th>
+                      <th style={{ textAlign: "center", padding: "8px 6px", width: 40 }}></th>
+                    </tr></thead>
+                    <tbody>
+                      {sgpResults.props.slice(0, 100).map((p, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${c.border}08` }}>
+                          <td style={{ padding: "8px 6px", color: c.text }}>{p.player?.full_name || p.player?.name || p.description || "—"}</td>
+                          <td style={{ padding: "8px 6px", color: c.textDim }}>{p.market_type || p.stat_type || "—"}</td>
+                          <td style={{ textAlign: "center", padding: "8px 6px", fontFamily: "'JetBrains Mono', monospace", color: c.cyan }}>{p.line ?? "—"}</td>
+                          <td style={{ textAlign: "center", padding: "8px 6px", fontFamily: "'JetBrains Mono', monospace", color: c.green }}>{p.over_odds ? formatOdds(p.over_odds) : "—"}</td>
+                          <td style={{ textAlign: "center", padding: "8px 6px", fontFamily: "'JetBrains Mono', monospace", color: c.red }}>{p.under_odds ? formatOdds(p.under_odds) : "—"}</td>
+                          <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                            <button onClick={() => setSgpSavedCombos(prev => [...prev, { id: Date.now(), ...p, savedDate: new Date().toISOString().slice(0, 10) }])} style={{ background: "transparent", border: `1px solid ${c.border}`, borderRadius: 4, padding: "2px 8px", fontSize: 9, color: c.green, cursor: "pointer" }}>Save</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Saved combos */}
+        {sgpSavedCombos.length > 0 && (
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Saved Combos ({sgpSavedCombos.length})</h3>
+              <button onClick={() => { if (confirm("Clear all saved combos?")) setSgpSavedCombos([]); }} style={{ ...btnSecondary, padding: "4px 12px", fontSize: 10 }}>Clear All</button>
+            </div>
+            <div style={{ maxHeight: 300, overflowY: "auto" }}>
+              {sgpSavedCombos.sort((a,b) => (b.savedDate || "").localeCompare(a.savedDate || "")).map(combo => (
+                <div key={combo.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${c.border}08`, fontSize: 12 }}>
+                  <span style={{ color: c.text }}>{combo.player?.full_name || combo.description || "—"} — {combo.market_type || combo.stat_type || ""} {combo.line || ""}</span>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <span style={{ color: c.textDim, fontSize: 10 }}>{combo.savedDate}</span>
+                    <button onClick={() => setSgpSavedCombos(prev => prev.filter(c => c.id !== combo.id))} style={{ background: "transparent", border: "none", color: c.textDim, cursor: "pointer", fontSize: 10 }}>✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Workflow guide */}
+        <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 20 }}>
+          <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: "0 0 12px", fontFamily: "'JetBrains Mono', monospace" }}>Daily Workflow</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+            <div style={{ background: c.bg, borderRadius: 10, padding: 14 }}>
+              <div style={{ fontSize: 18, marginBottom: 6 }}>1️⃣</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Fetch Slate</div>
+              <div style={{ fontSize: 11, color: c.textDim, lineHeight: 1.5 }}>Click "Fetch Today's Slate" to pull games and player props from BallDontLie API.</div>
+            </div>
+            <div style={{ background: c.bg, borderRadius: 10, padding: 14 }}>
+              <div style={{ fontSize: 18, marginBottom: 6 }}>2️⃣</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Save Props</div>
+              <div style={{ fontSize: 11, color: c.textDim, lineHeight: 1.5 }}>Review props and save interesting combos. Look for correlated pairs (e.g. PTS + REB for bigs).</div>
+            </div>
+            <div style={{ background: c.bg, borderRadius: 10, padding: 14 }}>
+              <div style={{ fontSize: 18, marginBottom: 6 }}>3️⃣</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Price on Pikkit</div>
+              <div style={{ fontSize: 11, color: c.textDim, lineHeight: 1.5 }}>Open Pikkit SGP tool, build your combos, compare pricing across books. (~15-20 min)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAccounting = () => {
     const totalReceiptCount = expenses.reduce((s, e) => s + (expenseReceipts[e.id] || []).length, 0);
     const totalW2gFiles = w2gDocuments.reduce((s, d) => s + (d.files || []).length, 0);
@@ -3931,7 +3950,7 @@ export default function BettingTracker() {
       {importTab === "csv" && (<>
         <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 24 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: c.text, margin: "0 0 4px" }}>Import Bets from CSV</h3>
-          <p style={{ fontSize: 13, color: c.textDim, lineHeight: 1.7, margin: "0 0 16px" }}>Upload your transaction export and bets import instantly. Supports Pikkit, Polymarket, and generic CSV formats. Imports straights, parlays, round robins & cash-outs. Partial parlay payouts handled automatically. Cash-outs and pushes graded as push. All dates converted to EST. Duplicates auto-filtered by bet ID.</p>
+          <p style={{ fontSize: 13, color: c.textDim, lineHeight: 1.7, margin: "0 0 16px" }}>Upload your transaction export and bets import instantly. Auto-detects format, converts decimal→American odds, filters settled straight bets, skips parlays/round robins. Duplicates auto-filtered by bet ID.</p>
           <div style={{ background: "rgba(99,102,241,0.06)", border: `1px solid rgba(99,102,241,0.15)`, borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: c.blue, marginBottom: 6 }}>Your format (auto-detected)</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
@@ -3999,41 +4018,14 @@ export default function BettingTracker() {
               ↓ Export Backup
             </button>
             <label style={{ ...btnSecondary, padding: "10px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-              ↑ Restore File
+              ↑ Restore Backup
               <input type="file" accept=".json" onChange={importBackup} style={{ display: "none" }} />
             </label>
-            <button onClick={() => setShowPasteRestore(p => !p)} style={{ ...btnSecondary, padding: "10px 20px", display: "flex", alignItems: "center", gap: 6 }}>
-              📋 Paste JSON
-            </button>
             <span style={{ fontSize: 11, color: c.textDim, marginLeft: 4 }}>
               {bets.length} bets · {expenses.length} expenses · {profiles.length} profile{profiles.length !== 1 ? "s" : ""} · {bankrollEntries.length} books
             </span>
           </div>
-          {showPasteRestore && (
-            <div style={{ marginTop: 16 }}>
-              <textarea value={pasteJson} onChange={e => setPasteJson(e.target.value)} placeholder="Paste your backup JSON here…" style={{ width: "100%", height: 150, background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 8, padding: 12, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} />
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={handlePasteRestore} disabled={!pasteJson.trim()} style={{ ...btnPrimary, padding: "8px 18px", fontSize: 12, opacity: pasteJson.trim() ? 1 : 0.4 }}>Restore from Paste</button>
-                <button onClick={() => { setShowPasteRestore(false); setPasteJson(""); }} style={{ ...btnSecondary, padding: "8px 18px", fontSize: 12 }}>Cancel</button>
-              </div>
-            </div>
-          )}
         </div>
-
-        {/* Export JSON viewer (artifact/browser fallback) */}
-        {exportedJson && (
-          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: 22 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ fontSize: 13, color: c.textDim, textTransform: "uppercase", letterSpacing: 1.2, margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>Backup JSON</h3>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { const ta = document.getElementById("export-json-ta"); if (ta) { ta.focus(); ta.select(); } }} style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11 }}>Select All</button>
-                <button onClick={() => setExportedJson(null)} style={{ ...btnSecondary, padding: "6px 14px", fontSize: 11 }}>Close</button>
-              </div>
-            </div>
-            <textarea id="export-json-ta" readOnly value={exportedJson} style={{ width: "100%", height: 200, background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 8, padding: 12, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} onFocus={e => e.target.select()} />
-            <p style={{ fontSize: 11, color: c.textDim, margin: "8px 0 0" }}>Click "Select All" then ⌘C to copy. Save as a .json file for backup.</p>
-          </div>
-        )}
 
         {/* Danger Zone */}
         <div style={{ background: "rgba(255,77,106,0.03)", border: `1px solid rgba(255,77,106,0.15)`, borderRadius: 14, padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4157,7 +4149,7 @@ export default function BettingTracker() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, background: c.card, zIndex: 2 }}><tr>{["Date", "League", "Event", "Pick", "Type", "Odds", "Close", "CLV", "Stake", "Book", "Result", "P&L"].map(h => <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: c.textDim, fontWeight: 500, borderBottom: `1px solid ${c.borderLight}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(b => {
-            const clvOpen = impliedProb(b.odds); const clv = clvOpen > 0 && b.closingOdds !== 0 ? ((impliedProb(b.closingOdds) - clvOpen) / clvOpen) * 100 : 0;
+            const clv = ((impliedProb(b.closingOdds) - impliedProb(b.odds)) / impliedProb(b.odds)) * 100;
             return (
               <tr key={b.id} style={{ borderBottom: `1px solid ${c.border}08` }}>
                 <td style={{ padding: "8px", color: c.textDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{b.date}</td>
@@ -4182,13 +4174,13 @@ export default function BettingTracker() {
 
   /* ═══ LAYOUT ═══ */
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: c.bg, color: c.text, fontFamily: "'DM Sans', -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: c.bg, color: c.text, fontFamily: "'DM Sans', -apple-system, sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:${c.borderLight};border-radius:3px}input[type=number]::-webkit-inner-spin-button{opacity:.5}@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@keyframes slideDown{from{opacity:0;transform:translateY(-100%)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}`}</style>
 
       {/* ─── Update Banner ─── */}
       {updateAvailable && !updateDismissed && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, animation: "slideDown 0.4s ease", background: updateAvailable.forceUpdate ? `linear-gradient(135deg, ${c.red}, #cc2244)` : `linear-gradient(135deg, ${c.blue}, ${c.purple})`, padding: "10px 28px", paddingLeft: window.electronAPI ? 88 : 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, animation: "slideDown 0.4s ease", background: updateAvailable.forceUpdate ? `linear-gradient(135deg, ${c.red}, #cc2244)` : `linear-gradient(135deg, ${c.blue}, ${c.purple})`, padding: "10px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
             <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
               {updateAvailable.forceUpdate ? "⚠" : "✦"}
@@ -4207,7 +4199,7 @@ export default function BettingTracker() {
               What's New
             </button>
             <button onClick={applyUpdate} style={{ background: "rgba(255,255,255,0.95)", border: "none", borderRadius: 8, padding: "6px 18px", color: "#111", fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }}>
-              {window.electronAPI ? "Download Update" : "Update Now"}
+              Update Now
             </button>
             {!updateAvailable.forceUpdate && (
               <button onClick={() => setUpdateDismissed(true)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", fontSize: 16, cursor: "pointer", padding: "4px 8px", lineHeight: 1 }}>✕</button>
@@ -4242,12 +4234,12 @@ export default function BettingTracker() {
               </div>
             ))}
             <button onClick={() => { setShowChangelog(false); applyUpdate(); }} style={{ width: "100%", background: `linear-gradient(135deg, ${c.green}, ${c.blue})`, border: "none", borderRadius: 10, padding: "12px 0", color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
-              {window.electronAPI ? "Download" : "Update to"} v{updateAvailable.version}
+              Update to v{updateAvailable.version}
             </button>
           </div>
         </div>
       )}
-      <div style={{ borderBottom: `1px solid ${c.border}`, padding: "16px 28px", paddingLeft: window.electronAPI ? 88 : 28, display: "flex", justifyContent: "space-between", alignItems: "center", background: `linear-gradient(180deg, rgba(10,11,15,0.98), ${c.bg})`, backdropFilter: "blur(12px)", flexShrink: 0, zIndex: 50 }}>
+      <div style={{ borderBottom: `1px solid ${c.border}`, padding: "16px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", background: `linear-gradient(180deg, rgba(10,11,15,0.98), ${c.bg})`, backdropFilter: "blur(12px)", position: "sticky", top: (updateAvailable && !updateDismissed) ? 48 : 0, zIndex: 50, transition: "top 0.3s ease" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${c.green}, ${c.blue})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#000" }}>⚡</div>
           <div><h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: -0.5 }}>EdgeTracker</h1><span style={{ fontSize: 10, color: c.textDim, letterSpacing: 1.5, textTransform: "uppercase" }}>Sports Betting Analytics</span></div>
@@ -4338,17 +4330,17 @@ export default function BettingTracker() {
           </div>
         </div>
       )}
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
       <div style={{ padding: "24px 28px", maxWidth: 1240, margin: "0 auto" }}>
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "calendar" && renderCalendar()}
         {activeTab === "strategy" && renderStrategy()}
         {activeTab === "bankroll" && renderBankroll()}
+        {activeTab === "splits" && renderSplits()}
         {activeTab === "tax" && renderTax()}
         {activeTab === "accounting" && renderAccounting()}
+        {activeTab === "sgp" && renderSGP()}
         {activeTab === "import" && renderImport()}
         {activeTab === "bets" && renderBets()}
-      </div>
       </div>
     </div>
   );
